@@ -94,9 +94,18 @@ Return ONLY a JSON object with these exact fields: vendor, date, total, tax, cat
     });
 
   } catch (error) {
-    console.error("Error in ai-suggest:", error);
+    // Log full error details server-side only
+    console.error("Error in ai-suggest:", {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      timestamp: new Date().toISOString()
+    });
+    
+    // Return safe, generic error message to client
     return new Response(
-      JSON.stringify({ error: error.message || "Unknown error" }),
+      JSON.stringify({ 
+        error: "Failed to process receipt image. Please try again or contact support if the issue persists." 
+      }),
       {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
