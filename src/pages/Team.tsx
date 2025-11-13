@@ -28,7 +28,7 @@ interface PendingInvite {
   email: string;
   role: "admin" | "staff" | "owner";
   status: string;
-  token: string;
+  token: string | null;
   created_at: string;
 }
 
@@ -115,7 +115,7 @@ const Team = () => {
 
     const { data, error } = await supabase
       .from("org_invites")
-      .select("*")
+      .select("id, email, role, status, created_at, token")
       .eq("org_id", currentOrg.id)
       .order("created_at", { ascending: false });
 

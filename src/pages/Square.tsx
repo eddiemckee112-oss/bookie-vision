@@ -8,6 +8,7 @@ import SquarePaymentsUpload from "@/components/square/SquarePaymentsUpload";
 import SquareDepositsUpload from "@/components/square/SquareDepositsUpload";
 import SquareLoanUpload from "@/components/square/SquareLoanUpload";
 import SquareSummary from "@/components/square/SquareSummary";
+import SquareAccountMapper from "@/components/square/SquareAccountMapper";
 
 const Square = () => {
   const { currentOrg } = useOrg();
@@ -46,6 +47,8 @@ const Square = () => {
         </Alert>
 
         <SquareSummary key={refreshKey} orgId={currentOrg.id} />
+
+        <SquareAccountMapper orgId={currentOrg.id} />
 
         <div className="grid gap-6 md:grid-cols-2">
           <Card>

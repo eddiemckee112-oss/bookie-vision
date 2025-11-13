@@ -49,9 +49,13 @@ const SquarePaymentsUpload = ({ orgId, onComplete }: SquarePaymentsUploadProps) 
 
         if (error) throw error;
 
+        const errorMsg = data.errors?.length > 0 
+          ? `Errors: ${data.errors.slice(0, 3).join('; ')}` 
+          : '';
+
         toast({
           title: "Success",
-          description: `Imported ${data.imported} payment transactions. ${data.duplicates || 0} duplicates skipped.`,
+          description: `Imported ${data.imported} payments. Duplicates: ${data.duplicates || 0}, Skipped: ${data.skipped || 0}. ${errorMsg}`,
         });
 
         setFile(null);
