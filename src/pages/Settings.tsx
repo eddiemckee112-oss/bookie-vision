@@ -7,20 +7,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { UserPlus, Trash2, Building2 } from "lucide-react";
+import { UserPlus, Building2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { emailSchema } from "@/lib/validations";
-
-interface OrgMember {
-  id: string;
-  user_id: string;
-  role: "owner" | "admin" | "staff";
-  email?: string;
-}
+import { Badge } from "@/components/ui/badge";
 
 interface UserOrg {
   org_id: string;
@@ -30,11 +20,8 @@ interface UserOrg {
 }
 
 const Settings = () => {
-  const { currentOrg, loading: orgLoading, orgRole, orgs, switchOrg } = useOrg();
+  const { currentOrg, loading: orgLoading, switchOrg } = useOrg();
   const navigate = useNavigate();
-  const [members, setMembers] = useState<OrgMember[]>([]);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<"staff" | "admin">("staff");
   const [userOrgs, setUserOrgs] = useState<UserOrg[]>([]);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [newOrgName, setNewOrgName] = useState("");
@@ -48,31 +35,8 @@ const Settings = () => {
       return;
     }
     
-    // Server-side role verification
-    const verifyRole = async () => {
-      const { data: hasAccess } = await supabase.rpc("has_min_role", {
-        _user_id: (await supabase.auth.getUser()).data.user?.id,
-        _org_id: currentOrg.id,
-        _min_role: "admin",
-      });
-
-      if (!hasAccess) {
-        navigate("/dashboard");
-        return;
-      }
-      
-      fetchMembers();
-    };
-
-    // Client-side check for immediate UX (server-side is authoritative)
-    if (orgRole !== "owner" && orgRole !== "admin") {
-      navigate("/dashboard");
-      return;
-    }
-    
-    verifyRole();
     fetchUserOrgs();
-  }, [currentOrg, orgLoading, orgRole, navigate]);
+  }, [currentOrg, orgLoading, navigate]);
 
   const fetchUserOrgs = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -99,79 +63,6 @@ const Settings = () => {
     );
   };
 
-  const fetchMembers = async () => {
-    if (!currentOrg) return;
-
-    const { data, error } = await supabase
-      .from("org_users")
-      .select(`
-        id,
-        user_id,
-        role,
-        user:user_id (email)
-      `)
-      .eq("org_id", currentOrg.id);
-
-    if (error) {
-      toast({
-        title: "Error",
-        description: "Failed to load team members",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setMembers(
-      (data || []).map((m: any) => ({
-        id: m.id,
-        user_id: m.user_id,
-        role: m.role,
-        email: m.user?.email || "Unknown",
-      }))
-    );
-  };
-
-  const sendInvite = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentOrg) return;
-
-    try {
-      // Validate email
-      const validatedEmail = emailSchema.parse(inviteEmail);
-
-      const { error } = await supabase.from("org_invites").insert({
-        org_id: currentOrg.id,
-        email: validatedEmail,
-        role: inviteRole,
-        invited_by: (await supabase.auth.getUser()).data.user?.id,
-      });
-
-      if (error) throw error;
-
-      toast({
-        title: "Invite sent!",
-        description: `Invitation sent to ${validatedEmail}`,
-      });
-
-      setInviteEmail("");
-      setInviteRole("staff");
-    } catch (error: any) {
-      if (error.name === "ZodError") {
-        toast({
-          title: "Invalid Email",
-          description: error.errors[0]?.message || "Please enter a valid email address",
-          variant: "destructive",
-        });
-      } else {
-        toast({
-          title: "Invite failed",
-          description: "Failed to send invitation",
-          variant: "destructive",
-        });
-      }
-    }
-  };
-
   const handleCreateOrg = async (e: React.FormEvent) => {
     e.preventDefault();
     setCreateLoading(true);
@@ -191,10 +82,8 @@ const Settings = () => {
       setShowCreateDialog(false);
       setNewOrgName("");
       
-      // Refresh the orgs list
       await fetchUserOrgs();
       
-      // Switch to the new org
       if (org?.id) {
         localStorage.setItem("currentOrgId", org.id);
         switchOrg(org.id);
@@ -216,26 +105,14 @@ const Settings = () => {
     navigate("/dashboard");
   };
 
-  const removeMember = async (memberId: string) => {
-    const { error } = await supabase.from("org_users").delete().eq("id", memberId);
-
-    if (error) {
-      toast({
-        title: "Remove failed",
-        description: error.message,
-        variant: "destructive",
-      });
-      return;
-    }
-
-    toast({ title: "Member removed" });
-    fetchMembers();
-  };
-
-  const canManage = orgRole === "owner" || orgRole === "admin";
-
   if (orgLoading) {
-    return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+    return (
+      <Layout>
+        <div className="flex items-center justify-center min-h-[50vh]">
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </Layout>
+    );
   }
 
   return (
@@ -243,50 +120,8 @@ const Settings = () => {
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold">Settings</h1>
-          <p className="text-muted-foreground">Manage your organization</p>
+          <p className="text-muted-foreground">Manage your organizations</p>
         </div>
-
-        {canManage && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Invite Team Member</CardTitle>
-              <CardDescription>Send an invitation to join your organization</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={sendInvite} className="space-y-4">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="email">Email Address</Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      placeholder="colleague@example.com"
-                      value={inviteEmail}
-                      onChange={(e) => setInviteEmail(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="role">Role</Label>
-                    <Select value={inviteRole} onValueChange={(v: any) => setInviteRole(v)}>
-                      <SelectTrigger id="role">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="staff">Staff</SelectItem>
-                        <SelectItem value="admin">Admin</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <Button type="submit">
-                  <UserPlus className="mr-2 h-4 w-4" />
-                  Send Invite
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
-        )}
 
         <Card>
           <CardHeader>
@@ -365,49 +200,6 @@ const Settings = () => {
                 </form>
               </DialogContent>
             </Dialog>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Team Members</CardTitle>
-            <CardDescription>People in your organization</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Role</TableHead>
-                  {orgRole === "owner" && <TableHead className="text-right">Actions</TableHead>}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {members.map((member) => (
-                  <TableRow key={member.id}>
-                    <TableCell>{member.email}</TableCell>
-                    <TableCell>
-                      <Badge variant={member.role === "owner" ? "default" : "secondary"}>
-                        {member.role}
-                      </Badge>
-                    </TableCell>
-                    {orgRole === "owner" && (
-                      <TableCell className="text-right">
-                        {member.role !== "owner" && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => removeMember(member.id)}
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        )}
-                      </TableCell>
-                    )}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
           </CardContent>
         </Card>
       </div>

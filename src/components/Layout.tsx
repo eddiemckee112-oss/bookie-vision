@@ -11,7 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { LayoutDashboard, Receipt, CreditCard, FileText, Settings, LogOut, Building2, Menu } from "lucide-react";
+import { LayoutDashboard, Receipt, CreditCard, FileText, Settings, LogOut, Building2, Menu, Users } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
@@ -32,6 +32,7 @@ const Layout = ({ children }: { children: ReactNode }) => {
     { icon: CreditCard, label: "Transactions", path: "/transactions" },
     { icon: FileText, label: "Reports", path: "/reports" },
     { icon: CreditCard, label: "Square", path: "/square" },
+    { icon: Users, label: "Team", path: "/team" },
     { icon: Settings, label: "Settings", path: "/settings" },
   ];
 

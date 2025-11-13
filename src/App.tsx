@@ -8,11 +8,13 @@ import Auth from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
 import Onboard from "./pages/Onboard";
 import ChooseOrg from "./pages/ChooseOrg";
+import AcceptInvite from "./pages/AcceptInvite";
 import Dashboard from "./pages/Dashboard";
 import Receipts from "./pages/Receipts";
 import Transactions from "./pages/Transactions";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
+import Team from "./pages/Team";
 import Square from "./pages/Square";
 import NotFound from "./pages/NotFound";
 
@@ -31,11 +33,13 @@ const App = () => (
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/onboard" element={<Onboard />} />
             <Route path="/choose-org" element={<ChooseOrg />} />
+            <Route path="/accept-invite" element={<AcceptInvite />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/receipts" element={<Receipts />} />
             <Route path="/transactions" element={<Transactions />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/square" element={<Square />} />
+            <Route path="/team" element={<Team />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<NotFound />} />
           </Routes>

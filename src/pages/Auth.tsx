@@ -81,6 +81,14 @@ const Auth = () => {
         description: "Signed in successfully.",
       });
 
+      // Check if there's a pending invite token
+      const pendingToken = localStorage.getItem("pendingInviteToken");
+      if (pendingToken) {
+        localStorage.removeItem("pendingInviteToken");
+        navigate(`/accept-invite?token=${pendingToken}`);
+        return;
+      }
+
       // Route based on org count
       if (!orgUsers || orgUsers.length === 0) {
         // No orgs - go to onboarding
