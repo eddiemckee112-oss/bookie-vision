@@ -35,11 +35,30 @@ const Settings = () => {
       navigate("/onboard");
       return;
     }
+    
+    // Server-side role verification
+    const verifyRole = async () => {
+      const { data: hasAccess } = await supabase.rpc("has_min_role", {
+        _user_id: (await supabase.auth.getUser()).data.user?.id,
+        _org_id: currentOrg.id,
+        _min_role: "admin",
+      });
+
+      if (!hasAccess) {
+        navigate("/dashboard");
+        return;
+      }
+      
+      fetchMembers();
+    };
+
+    // Client-side check for immediate UX (server-side is authoritative)
     if (orgRole !== "owner" && orgRole !== "admin") {
       navigate("/dashboard");
       return;
     }
-    fetchMembers();
+    
+    verifyRole();
   }, [currentOrg, orgLoading, orgRole, navigate]);
 
   const fetchMembers = async () => {
