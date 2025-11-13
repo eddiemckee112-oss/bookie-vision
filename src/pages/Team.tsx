@@ -82,20 +82,27 @@ const Team = () => {
       return;
     }
 
-    // Fetch emails from auth.users via a separate query
+    // Fetch user emails from profiles table (secure, RLS-protected)
     const userIds = data?.map(m => m.user_id) || [];
     if (userIds.length === 0) {
       setMembers([]);
       return;
     }
 
-    // Get user emails
-    const { data: usersData } = await supabase.auth.admin.listUsers();
+    // Get user emails from profiles table with proper RLS
+    const { data: profiles, error: profilesError } = await supabase
+      .from('profiles')
+      .select('id, email')
+      .in('id', userIds);
+
+    if (profilesError) {
+      console.error("Error fetching profiles:", profilesError);
+    }
+
     const emailMap = new Map<string, string>();
-    const users = usersData?.users || [];
-    users.forEach(u => {
-      if (u.id && u.email) {
-        emailMap.set(u.id, u.email);
+    (profiles || []).forEach(p => {
+      if (p.id && p.email) {
+        emailMap.set(p.id, p.email);
       }
     });
 

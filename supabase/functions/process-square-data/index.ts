@@ -5,6 +5,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+const MAX_CSV_SIZE = 10_000_000; // 10MB
+const MAX_ROWS = 10000;
+
 interface SquareRequest {
   type: 'payments' | 'deposits' | 'loan';
   csv: string;
@@ -19,12 +22,44 @@ interface ProcessResult {
   errors: string[];
 }
 
+// Sanitize CSV values to prevent injection attacks
+function sanitizeCSVValue(value: string): string {
+  if (!value) return value;
+  // Remove formula prefixes that could trigger execution in Excel/Sheets
+  const dangerous = /^[=+\-@]/;
+  if (dangerous.test(value.trim())) {
+    return "'" + value; // Prefix with single quote to force text
+  }
+  return value;
+}
+
+// Verify user has access to the organization
+async function verifyOrgAccess(supabaseClient: any, userId: string, orgId: string): Promise<boolean> {
+  const { data } = await supabaseClient
+    .from('org_users')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('org_id', orgId)
+    .maybeSingle();
+  
+  return !!data;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    // Get authenticated user
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
@@ -33,26 +68,68 @@ Deno.serve(async (req) => {
           persistSession: false,
         },
         global: {
-          headers: { Authorization: req.headers.get('Authorization')! },
+          headers: { Authorization: authHeader },
         },
       }
     );
 
-    const { type, csv, org_id, account_id } = await req.json() as SquareRequest;
+    // Verify authentication
+    const { data: { user }, error: authError } = await supabaseClient.auth.getUser();
+    if (authError || !user) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
-    console.log(`Processing Square ${type} CSV for org ${org_id}`);
+    const body = await req.json();
+    
+    // Validate request
+    const { type, csv, org_id, account_id } = body as SquareRequest;
+    
+    if (!type || !['payments', 'deposits', 'loan'].includes(type)) {
+      throw new Error('Invalid type parameter');
+    }
+    
+    if (!csv || typeof csv !== 'string') {
+      throw new Error('Invalid CSV data');
+    }
+    
+    if (csv.length > MAX_CSV_SIZE) {
+      throw new Error(`CSV too large. Maximum size is ${MAX_CSV_SIZE / 1_000_000}MB`);
+    }
+    
+    if (!org_id || typeof org_id !== 'string') {
+      throw new Error('Invalid organization ID');
+    }
+
+    // Verify user has access to this organization
+    const hasAccess = await verifyOrgAccess(supabaseClient, user.id, org_id);
+    if (!hasAccess) {
+      return new Response(
+        JSON.stringify({ error: 'Access denied to organization' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log(`Processing Square ${type} CSV for org ${org_id}, user ${user.id}`);
 
     const lines = csv.split('\n').filter(line => line.trim());
     if (lines.length < 2) {
       throw new Error('CSV file is empty or invalid');
     }
+    
+    if (lines.length > MAX_ROWS + 1) {
+      throw new Error(`Too many rows. Maximum ${MAX_ROWS} rows allowed`);
+    }
 
-    const headers = parseCSVLine(lines[0]).map(h => h.trim());
+    // Parse and sanitize CSV
+    const headers = parseCSVLine(lines[0]).map(h => sanitizeCSVValue(h.trim()));
     const rows = lines.slice(1).map(line => {
       const values = parseCSVLine(line);
       const obj: any = {};
       headers.forEach((header, i) => {
-        obj[header] = values[i] || '';
+        obj[header] = sanitizeCSVValue(values[i] || '');
       });
       return obj;
     });
