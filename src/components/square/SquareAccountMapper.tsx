@@ -143,7 +143,6 @@ const SquareAccountMapper = ({ orgId }: SquareAccountMapperProps) => {
               <SelectValue placeholder="Select account for payments" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">None</SelectItem>
               {accounts.map(acc => (
                 <SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>
               ))}
@@ -158,7 +157,6 @@ const SquareAccountMapper = ({ orgId }: SquareAccountMapperProps) => {
               <SelectValue placeholder="Select account for deposits" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">None</SelectItem>
               {accounts.map(acc => (
                 <SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>
               ))}
@@ -173,7 +171,6 @@ const SquareAccountMapper = ({ orgId }: SquareAccountMapperProps) => {
               <SelectValue placeholder="Select account for loan repayments" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">None</SelectItem>
               {accounts.map(acc => (
                 <SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>
               ))}
