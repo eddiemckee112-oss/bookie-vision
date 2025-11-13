@@ -60,19 +60,39 @@ const Auth = () => {
     setLoading(true);
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { error, data } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
 
       if (error) throw error;
 
+      // Check how many orgs this user belongs to
+      const { data: orgUsers, error: orgError } = await supabase
+        .from("org_users")
+        .select("org_id, role")
+        .eq("user_id", data.user.id)
+        .order("created_at", { ascending: true });
+
+      if (orgError) throw orgError;
+
       toast({
         title: "Welcome back!",
         description: "Signed in successfully.",
       });
 
-      navigate("/dashboard");
+      // Route based on org count
+      if (!orgUsers || orgUsers.length === 0) {
+        // No orgs - go to onboarding
+        navigate("/onboard");
+      } else if (orgUsers.length === 1) {
+        // Exactly one org - set it as active and go to dashboard
+        localStorage.setItem("currentOrgId", orgUsers[0].org_id);
+        navigate("/dashboard");
+      } else {
+        // Multiple orgs - let user choose
+        navigate("/choose-org");
+      }
     } catch (error: any) {
       toast({
         title: "Sign in failed",

@@ -24,6 +24,27 @@ const Onboard = () => {
       // Validate organization name
       const validatedName = orgNameSchema.parse(orgName);
 
+      // Check if user already has an org with this name
+      const { data: existingOrgs } = await supabase
+        .from("org_users")
+        .select("org_id, orgs(name)")
+        .eq("user_id", (await supabase.auth.getUser()).data.user?.id);
+
+      const duplicate = existingOrgs?.find(
+        (ou: any) => ou.orgs?.name.toLowerCase() === validatedName.toLowerCase()
+      );
+
+      if (duplicate) {
+        toast({
+          title: "Organization already exists",
+          description: `You already have a company named "${validatedName}". Switching to it instead.`,
+        });
+        localStorage.setItem("currentOrgId", duplicate.org_id);
+        await refreshOrgs();
+        navigate("/dashboard");
+        return;
+      }
+
       // Use backend function to create org and assign owner in one atomic operation
       const { data: org, error: orgError } = await supabase.rpc("create_org", {
         _name: validatedName,

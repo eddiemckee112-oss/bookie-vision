@@ -7,6 +7,7 @@ import { OrgProvider } from "./contexts/OrgContext";
 import Auth from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
 import Onboard from "./pages/Onboard";
+import ChooseOrg from "./pages/ChooseOrg";
 import Dashboard from "./pages/Dashboard";
 import Receipts from "./pages/Receipts";
 import Transactions from "./pages/Transactions";
@@ -29,6 +30,7 @@ const App = () => (
             <Route path="/auth" element={<Auth />} />
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/onboard" element={<Onboard />} />
+            <Route path="/choose-org" element={<ChooseOrg />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/receipts" element={<Receipts />} />
             <Route path="/transactions" element={<Transactions />} />
