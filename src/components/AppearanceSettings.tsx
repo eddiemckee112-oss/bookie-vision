@@ -10,6 +10,9 @@ const accentColors = [
   { value: "purple", label: "Purple", class: "bg-[hsl(262,83%,58%)]" },
   { value: "orange", label: "Orange", class: "bg-[hsl(25,95%,53%)]" },
   { value: "red", label: "Red", class: "bg-[hsl(0,72%,51%)]" },
+  { value: "pink", label: "Pink", class: "bg-[hsl(330,81%,60%)]" },
+  { value: "teal", label: "Teal", class: "bg-[hsl(180,77%,47%)]" },
+  { value: "amber", label: "Amber", class: "bg-[hsl(45,93%,53%)]" },
 ];
 
 export function AppearanceSettings() {
@@ -64,7 +67,7 @@ export function AppearanceSettings() {
         {/* Accent Color Selection */}
         <div className="space-y-3">
           <Label className="text-sm font-medium">Accent Color</Label>
-          <div className="grid grid-cols-5 gap-3">
+          <div className="grid grid-cols-4 gap-3">
             {accentColors.map((color) => (
               <button
                 key={color.value}

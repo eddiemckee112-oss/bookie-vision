@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 
 type Theme = "light" | "dark" | "system";
-type AccentColor = "blue" | "green" | "purple" | "orange" | "red";
+type AccentColor = "blue" | "green" | "purple" | "orange" | "red" | "pink" | "teal" | "amber";
 
 interface ThemeContextType {
   theme: Theme;
