@@ -1,1 +1,7 @@
 project_id = "bmsdxvhxvrnmuclvbzsr"
+
+[functions.process-receipt]
+verify_jwt = true
+
+[functions.process-csv-transactions]
+verify_jwt = true

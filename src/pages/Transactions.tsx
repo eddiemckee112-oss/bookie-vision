@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import CSVUploader from "@/components/transactions/CSVUploader";
 
 interface Transaction {
   id: string;
@@ -65,6 +66,11 @@ const Transactions = () => {
           <h1 className="text-3xl font-bold">Transactions</h1>
           <p className="text-muted-foreground">View and manage your bank transactions</p>
         </div>
+
+        <CSVUploader 
+          orgId={currentOrg!.id} 
+          onUploadComplete={fetchTransactions}
+        />
 
         <Card className="p-6">
           <Table>
