@@ -81,6 +81,21 @@ All colors MUST be HSL.
     --ring: 0 72% 51%;
   }
 
+  [data-accent="pink"] {
+    --primary: 330 81% 60%;
+    --ring: 330 81% 60%;
+  }
+
+  [data-accent="teal"] {
+    --primary: 180 77% 47%;
+    --ring: 180 77% 47%;
+  }
+
+  [data-accent="amber"] {
+    --primary: 45 93% 53%;
+    --ring: 45 93% 53%;
+  }
+
   .dark {
     --background: 220 15% 8%;
     --foreground: 210 20% 95%;
@@ -143,6 +158,21 @@ All colors MUST be HSL.
   .dark[data-accent="red"] {
     --primary: 0 72% 55%;
     --ring: 0 72% 55%;
+  }
+
+  .dark[data-accent="pink"] {
+    --primary: 330 81% 65%;
+    --ring: 330 81% 65%;
+  }
+
+  .dark[data-accent="teal"] {
+    --primary: 180 77% 52%;
+    --ring: 180 77% 52%;
+  }
+
+  .dark[data-accent="amber"] {
+    --primary: 45 93% 58%;
+    --ring: 45 93% 58%;
   }
 }
 
