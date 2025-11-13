@@ -104,10 +104,15 @@ serve(async (req) => {
     const parsedData = JSON.parse(toolCall.function.arguments);
     console.log("Parsed transactions:", parsedData.transactions.length);
 
-    // Initialize Supabase client
+    // Initialize Supabase client with service role for inserting
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = authHeader.replace("Bearer ", "");
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
 
     // Insert transactions
     const transactionsToInsert = parsedData.transactions.map((txn: any) => ({
