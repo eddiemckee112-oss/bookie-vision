@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { UserPlus, Building2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
+import { AppearanceSettings } from "@/components/AppearanceSettings";
 
 interface UserOrg {
   org_id: string;
@@ -120,8 +121,10 @@ const Settings = () => {
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold">Settings</h1>
-          <p className="text-muted-foreground">Manage your organizations</p>
+          <p className="text-muted-foreground">Manage your preferences and organizations</p>
         </div>
+
+        <AppearanceSettings />
 
         <Card>
           <CardHeader>

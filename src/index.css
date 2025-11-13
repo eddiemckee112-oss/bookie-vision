@@ -46,20 +46,39 @@ All colors MUST be HSL.
     --shadow-primary: 0 4px 14px 0 rgb(37 99 235 / 0.15);
 
     --sidebar-background: 0 0% 98%;
-
     --sidebar-foreground: 240 5.3% 26.1%;
-
     --sidebar-primary: 240 5.9% 10%;
-
     --sidebar-primary-foreground: 0 0% 98%;
-
     --sidebar-accent: 240 4.8% 95.9%;
-
     --sidebar-accent-foreground: 240 5.9% 10%;
-
     --sidebar-border: 220 13% 91%;
-
     --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  /* Accent Color Variations */
+  [data-accent="blue"] {
+    --primary: 217 91% 60%;
+    --ring: 217 91% 60%;
+  }
+
+  [data-accent="green"] {
+    --primary: 142 71% 45%;
+    --ring: 142 71% 45%;
+  }
+
+  [data-accent="purple"] {
+    --primary: 262 83% 58%;
+    --ring: 262 83% 58%;
+  }
+
+  [data-accent="orange"] {
+    --primary: 25 95% 53%;
+    --ring: 25 95% 53%;
+  }
+
+  [data-accent="red"] {
+    --primary: 0 72% 51%;
+    --ring: 0 72% 51%;
   }
 
   .dark {
@@ -99,6 +118,32 @@ All colors MUST be HSL.
     --sidebar-border: 240 3.7% 15.9%;
     --sidebar-ring: 217.2 91.2% 59.8%;
   }
+
+  /* Dark Mode Accent Variations */
+  .dark[data-accent="blue"] {
+    --primary: 217 91% 60%;
+    --ring: 217 91% 60%;
+  }
+
+  .dark[data-accent="green"] {
+    --primary: 142 71% 50%;
+    --ring: 142 71% 50%;
+  }
+
+  .dark[data-accent="purple"] {
+    --primary: 262 83% 65%;
+    --ring: 262 83% 65%;
+  }
+
+  .dark[data-accent="orange"] {
+    --primary: 25 95% 58%;
+    --ring: 25 95% 58%;
+  }
+
+  .dark[data-accent="red"] {
+    --primary: 0 72% 55%;
+    --ring: 0 72% 55%;
+  }
 }
 
 @layer base {
@@ -107,6 +152,11 @@ All colors MUST be HSL.
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground transition-colors duration-200;
+  }
+
+  /* Smooth transitions for theme changes */
+  * {
+    @apply transition-colors duration-200;
   }
 }
