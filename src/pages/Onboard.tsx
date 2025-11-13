@@ -21,6 +21,19 @@ const Onboard = () => {
     setLoading(true);
 
     try {
+      // Get authenticated user first
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        toast({
+          title: "Authentication required",
+          description: "Please log in to create an organization",
+          variant: "destructive",
+        });
+        navigate("/auth");
+        return;
+      }
+
       // Validate organization name
       const validatedName = orgNameSchema.parse(orgName);
 
@@ -28,7 +41,7 @@ const Onboard = () => {
       const { data: existingOrgs } = await supabase
         .from("org_users")
         .select("org_id, orgs(name)")
-        .eq("user_id", (await supabase.auth.getUser()).data.user?.id);
+        .eq("user_id", user.id);
 
       const duplicate = existingOrgs?.find(
         (ou: any) => ou.orgs?.name.toLowerCase() === validatedName.toLowerCase()
