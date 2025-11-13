@@ -6,6 +6,7 @@ import Layout from "@/components/Layout";
 import ReceiptUploader from "@/components/receipt/ReceiptUploader";
 import { ReceiptData } from "@/types/receipt";
 import ProcessingState from "@/components/receipt/ProcessingState";
+import ReceiptReview from "@/components/receipt/ReceiptReview";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -29,6 +30,7 @@ const Receipts = () => {
   const navigate = useNavigate();
   const [isProcessing, setIsProcessing] = useState(false);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [reviewData, setReviewData] = useState<(ReceiptData & { imageUrl?: string }) | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -63,7 +65,14 @@ const Receipts = () => {
 
   const handleProcessingComplete = async (data: ReceiptData & { imageUrl?: string }) => {
     setIsProcessing(false);
+    setReviewData(data);
+    toast({
+      title: "Receipt processed!",
+      description: "Data extracted successfully.",
+    });
+  };
 
+  const handleConfirmReceipt = async (data: ReceiptData & { imageUrl?: string }) => {
     if (!currentOrg) return;
 
     try {
@@ -85,15 +94,16 @@ const Receipts = () => {
 
       toast({
         title: "Success",
-        description: "Receipt processed and saved",
+        description: "Receipt saved successfully",
       });
 
+      setReviewData(null);
       fetchReceipts();
     } catch (error: any) {
       if (error.name === "ZodError") {
         toast({
           title: "Validation Error",
-          description: "Receipt data is invalid. Please try again.",
+          description: "Receipt data is invalid. Please check the fields.",
           variant: "destructive",
         });
       } else {
@@ -136,16 +146,24 @@ const Receipts = () => {
           <p className="text-muted-foreground">Upload and manage your receipts</p>
         </div>
 
-        <Card className="p-6">
-          {isProcessing ? (
-            <ProcessingState />
-          ) : (
-            <ReceiptUploader
-              onProcessingStart={() => setIsProcessing(true)}
-              onProcessingComplete={handleProcessingComplete}
-            />
-          )}
-        </Card>
+        {reviewData ? (
+          <ReceiptReview
+            data={reviewData}
+            onConfirm={handleConfirmReceipt}
+            onCancel={() => setReviewData(null)}
+          />
+        ) : (
+          <Card className="p-6">
+            {isProcessing ? (
+              <ProcessingState />
+            ) : (
+              <ReceiptUploader
+                onProcessingStart={() => setIsProcessing(true)}
+                onProcessingComplete={handleProcessingComplete}
+              />
+            )}
+          </Card>
+        )}
 
         <Card className="p-6">
           <h2 className="text-xl font-semibold mb-4">Recent Receipts</h2>
