@@ -61,7 +61,7 @@ const Receipts = () => {
     setReceipts(data || []);
   };
 
-  const handleProcessingComplete = async (data: ReceiptData) => {
+  const handleProcessingComplete = async (data: ReceiptData & { imageUrl?: string }) => {
     setIsProcessing(false);
 
     if (!currentOrg) return;
@@ -78,6 +78,7 @@ const Receipts = () => {
         tax: validatedData.tax || 0,
         category: validatedData.category,
         source: validatedData.paymentMethod,
+        image_url: data.imageUrl || null,
       });
 
       if (error) throw error;

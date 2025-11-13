@@ -26,8 +26,6 @@ serve(async (req) => {
       throw new Error("No image provided");
     }
 
-    console.log("Processing receipt with AI...");
-
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY not configured");
@@ -124,13 +122,10 @@ serve(async (req) => {
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error("AI API error:", response.status, errorText);
       throw new Error(`AI processing failed: ${response.status}`);
     }
 
     const aiResponse = await response.json();
-    console.log("AI response received");
 
     // Extract tool call result
     const toolCall = aiResponse.choices[0]?.message?.tool_calls?.[0];
@@ -139,7 +134,6 @@ serve(async (req) => {
     }
 
     const receiptData = JSON.parse(toolCall.function.arguments);
-    console.log("Receipt data extracted:", receiptData);
 
     return new Response(
       JSON.stringify({ receiptData }),
@@ -147,7 +141,6 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    console.error("Error processing receipt:", error);
     return new Response(
       JSON.stringify({ 
         error: error instanceof Error ? error.message : "Unknown error occurred" 

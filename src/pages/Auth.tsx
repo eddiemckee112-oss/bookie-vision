@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { passwordSchema } from "@/lib/validations";
 
 const Auth = () => {
   const [email, setEmail] = useState("");
@@ -20,6 +21,9 @@ const Auth = () => {
     setLoading(true);
 
     try {
+      // Validate password strength
+      passwordSchema.parse(password);
+
       const { error } = await supabase.auth.signUp({
         email,
         password,
@@ -39,7 +43,7 @@ const Auth = () => {
     } catch (error: any) {
       toast({
         title: "Sign up failed",
-        description: error.message,
+        description: error.message || "Failed to create account",
         variant: "destructive",
       });
     } finally {
@@ -137,11 +141,15 @@ const Auth = () => {
                   <Input
                     id="signup-password"
                     type="password"
+                    placeholder="Min 12 chars, with uppercase, lowercase, number, special char"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
-                    minLength={6}
+                    minLength={12}
                   />
+                  <p className="text-xs text-muted-foreground">
+                    Must include uppercase, lowercase, number, and special character
+                  </p>
                 </div>
                 <Button type="submit" className="w-full" disabled={loading}>
                   {loading ? "Creating account..." : "Sign Up"}

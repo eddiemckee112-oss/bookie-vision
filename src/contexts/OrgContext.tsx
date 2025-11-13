@@ -42,7 +42,9 @@ export const OrgProvider = ({ children }: { children: ReactNode }) => {
       .eq("user_id", userId);
 
     if (error) {
-      console.error("Error fetching orgs:", error);
+      if (import.meta.env.DEV) {
+        console.error("Error fetching orgs:", error);
+      }
       return [];
     }
 

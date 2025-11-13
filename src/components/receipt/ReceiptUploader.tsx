@@ -5,10 +5,11 @@ import { Upload, Image as ImageIcon, FileText } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { ReceiptData } from "@/types/receipt";
+import { useOrg } from "@/contexts/OrgContext";
 
 interface ReceiptUploaderProps {
   onProcessingStart: () => void;
-  onProcessingComplete: (data: ReceiptData) => void;
+  onProcessingComplete: (data: ReceiptData & { imageUrl?: string }) => void;
 }
 
 const ReceiptUploader = ({
@@ -18,6 +19,7 @@ const ReceiptUploader = ({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const { toast } = useToast();
+  const { currentOrg } = useOrg();
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
@@ -47,18 +49,19 @@ const ReceiptUploader = ({
   });
 
   const handleProcess = async () => {
-    if (!selectedFile) return;
+    if (!selectedFile || !currentOrg) return;
 
     onProcessingStart();
 
     try {
-      // Convert file to base64
+      // Convert file to base64 for AI processing
       const reader = new FileReader();
       reader.readAsDataURL(selectedFile);
       
       reader.onloadend = async () => {
         const base64String = reader.result as string;
 
+        // Process with AI
         const { data, error } = await supabase.functions.invoke("process-receipt", {
           body: { image: base64String },
         });
@@ -71,19 +74,45 @@ const ReceiptUploader = ({
           throw new Error(data.error);
         }
 
-        onProcessingComplete(data.receiptData);
+        // Upload image to storage
+        const timestamp = Date.now();
+        const fileExt = selectedFile.name.split('.').pop();
+        const filePath = `${currentOrg.id}/${timestamp}.${fileExt}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from('receipts')
+          .upload(filePath, selectedFile);
+
+        if (uploadError) {
+          if (import.meta.env.DEV) {
+            console.error("Error uploading receipt image:", uploadError);
+          }
+          // Continue even if upload fails - we have the data
+        }
+
+        // Return data with image URL
+        onProcessingComplete({
+          ...data.receiptData,
+          imageUrl: uploadError ? undefined : filePath,
+        });
         
         toast({
           title: "Receipt processed!",
           description: "Data extracted successfully.",
         });
+
+        // Clear the form
+        setSelectedFile(null);
+        setPreview(null);
       };
 
       reader.onerror = () => {
         throw new Error("Failed to read file");
       };
     } catch (error: any) {
-      console.error("Processing error:", error);
+      if (import.meta.env.DEV) {
+        console.error("Processing error:", error);
+      }
       toast({
         title: "Processing failed",
         description: error.message || "Failed to process receipt. Please try again.",
@@ -98,19 +127,20 @@ const ReceiptUploader = ({
     }
   };
 
+  const handleClear = () => {
+    setSelectedFile(null);
+    setPreview(null);
+  };
+
   return (
     <div className="space-y-4">
       <div
         {...getRootProps()}
-        className={`
-          border-2 border-dashed rounded-lg p-8 text-center cursor-pointer
-          transition-all duration-200
-          ${
-            isDragActive
-              ? "border-primary bg-primary/5 scale-[1.02]"
-              : "border-border hover:border-primary/50 hover:bg-muted/50"
-          }
-        `}
+        className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+          isDragActive
+            ? "border-primary bg-primary/5"
+            : "border-border hover:border-primary/50"
+        }`}
       >
         <input {...getInputProps()} />
         
@@ -118,28 +148,25 @@ const ReceiptUploader = ({
           <div className="space-y-4">
             <img
               src={preview}
-              alt="Receipt preview"
-              className="max-h-48 mx-auto rounded-lg shadow-md"
+              alt="Preview"
+              className="max-h-48 mx-auto rounded-lg object-contain"
             />
             <p className="text-sm text-muted-foreground">{selectedFile?.name}</p>
           </div>
         ) : selectedFile ? (
           <div className="space-y-2">
-            <FileText className="h-12 w-12 mx-auto text-primary" />
-            <p className="text-sm font-medium text-foreground">{selectedFile.name}</p>
-            <p className="text-xs text-muted-foreground">
-              {(selectedFile.size / 1024).toFixed(1)} KB
-            </p>
+            <FileText className="mx-auto h-12 w-12 text-muted-foreground" />
+            <p className="text-sm font-medium">{selectedFile.name}</p>
           </div>
         ) : (
           <div className="space-y-2">
-            <Upload className="h-12 w-12 mx-auto text-muted-foreground" />
+            <Upload className="mx-auto h-12 w-12 text-muted-foreground" />
             <div>
-              <p className="text-sm font-medium text-foreground">
-                Drop your receipt here, or click to browse
+              <p className="text-lg font-medium">
+                {isDragActive ? "Drop your receipt here" : "Upload Receipt"}
               </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                Supports JPG, PNG, WEBP, and PDF files
+              <p className="text-sm text-muted-foreground">
+                Drag & drop or click to select (Images or PDF)
               </p>
             </div>
           </div>
@@ -148,20 +175,11 @@ const ReceiptUploader = ({
 
       {selectedFile && (
         <div className="flex gap-2">
-          <Button
-            onClick={handleProcess}
-            className="flex-1 bg-gradient-to-r from-primary to-primary/90 hover:opacity-90 shadow-primary"
-          >
-            <ImageIcon className="h-4 w-4 mr-2" />
+          <Button onClick={handleProcess} className="flex-1">
+            <ImageIcon className="mr-2 h-4 w-4" />
             Process Receipt
           </Button>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setSelectedFile(null);
-              setPreview(null);
-            }}
-          >
+          <Button onClick={handleClear} variant="outline">
             Clear
           </Button>
         </div>
