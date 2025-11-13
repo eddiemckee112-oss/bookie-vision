@@ -11,7 +11,7 @@ import DashboardTabs from "@/components/dashboard/DashboardTabs";
 import { format } from "date-fns";
 
 const Dashboard = () => {
-  const { currentOrg, loading: orgLoading } = useOrg();
+  const { currentOrg, user, loading: orgLoading } = useOrg();
   const navigate = useNavigate();
   const [fromDate, setFromDate] = useState<Date | undefined>(undefined);
   const [toDate, setToDate] = useState<Date | undefined>(undefined);
@@ -25,12 +25,21 @@ const Dashboard = () => {
 
   useEffect(() => {
     if (orgLoading) return;
+    
+    // Check authentication first
+    if (!user) {
+      navigate("/auth");
+      return;
+    }
+    
+    // Then check for organization
     if (!currentOrg) {
       navigate("/onboard");
       return;
     }
+    
     fetchDashboardData();
-  }, [currentOrg, orgLoading, navigate, fromDate, toDate]);
+  }, [currentOrg, user, orgLoading, navigate, fromDate, toDate]);
 
   const fetchDashboardData = async () => {
     if (!currentOrg) return;
