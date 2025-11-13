@@ -564,6 +564,10 @@ export type Database = {
         }
         Returns: boolean
       }
+      user_in_org: {
+        Args: { _org_id: string; _user_id: string }
+        Returns: boolean
+      }
     }
     Enums: {
       user_role: "owner" | "admin" | "staff"
