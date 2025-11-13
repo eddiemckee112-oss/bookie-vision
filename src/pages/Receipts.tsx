@@ -3,34 +3,37 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useOrg } from "@/contexts/OrgContext";
 import Layout from "@/components/Layout";
-import ReceiptUploader from "@/components/receipt/ReceiptUploader";
-import { ReceiptData } from "@/types/receipt";
-import ProcessingState from "@/components/receipt/ProcessingState";
-import ReceiptReview from "@/components/receipt/ReceiptReview";
+import ReceiptForm from "@/components/receipt/ReceiptForm";
+import ReceiptEditDialog from "@/components/receipt/ReceiptEditDialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Pencil, Trash2 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ExternalLink, Link as LinkIcon, Pencil, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
-import { receiptDataSchema } from "@/lib/validations";
 
 interface Receipt {
   id: string;
   vendor: string;
   receipt_date: string;
   total: number;
+  tax: number;
   category: string | null;
   source: string | null;
-  reconciled: boolean;
+  notes: string | null;
+  image_url: string | null;
 }
 
 const Receipts = () => {
-  const { currentOrg, loading: orgLoading, orgRole } = useOrg();
+  const { currentOrg, loading: orgLoading } = useOrg();
   const navigate = useNavigate();
-  const [isProcessing, setIsProcessing] = useState(false);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
-  const [reviewData, setReviewData] = useState<(ReceiptData & { imageUrl?: string }) | null>(null);
+  const [matches, setMatches] = useState<Record<string, boolean>>({});
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [editingReceipt, setEditingReceipt] = useState<Receipt | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -45,78 +48,57 @@ const Receipts = () => {
   const fetchReceipts = async () => {
     if (!currentOrg) return;
     
-    const { data, error } = await supabase
+    const { data: receiptsData, error: receiptsError } = await supabase
       .from("receipts")
       .select("*")
       .eq("org_id", currentOrg.id)
       .order("receipt_date", { ascending: false });
 
-    if (error) {
+    if (receiptsError) {
       toast({
         title: "Error fetching receipts",
-        description: error.message,
+        description: receiptsError.message,
         variant: "destructive",
       });
       return;
     }
 
-    setReceipts(data || []);
-  };
+    setReceipts(receiptsData || []);
 
-  const handleProcessingComplete = async (data: ReceiptData & { imageUrl?: string }) => {
-    setIsProcessing(false);
-    setReviewData(data);
-    toast({
-      title: "Receipt processed!",
-      description: "Data extracted successfully.",
+    // Fetch matches
+    const { data: matchesData } = await supabase
+      .from("matches")
+      .select("receipt_id")
+      .eq("org_id", currentOrg.id);
+
+    const matchMap: Record<string, boolean> = {};
+    matchesData?.forEach((m) => {
+      matchMap[m.receipt_id] = true;
     });
+    setMatches(matchMap);
   };
 
-  const handleConfirmReceipt = async (data: ReceiptData & { imageUrl?: string }) => {
-    if (!currentOrg) return;
+  const handleMatchNow = (receiptId: string) => {
+    sessionStorage.setItem("linkReceipt", receiptId);
+    navigate("/transactions");
+  };
 
-    try {
-      // Validate the receipt data
-      const validatedData = receiptDataSchema.parse(data);
-
-      const { error } = await supabase.from("receipts").insert({
-        org_id: currentOrg.id,
-        vendor: validatedData.vendor,
-        receipt_date: validatedData.date,
-        total: validatedData.total,
-        tax: validatedData.tax || 0,
-        category: validatedData.category,
-        source: validatedData.paymentMethod,
-        image_url: data.imageUrl || null,
-      });
-
-      if (error) throw error;
-
-      toast({
-        title: "Success",
-        description: "Receipt saved successfully",
-      });
-
-      setReviewData(null);
-      fetchReceipts();
-    } catch (error: any) {
-      if (error.name === "ZodError") {
-        toast({
-          title: "Validation Error",
-          description: "Receipt data is invalid. Please check the fields.",
-          variant: "destructive",
-        });
-      } else {
-        toast({
-          title: "Error",
-          description: "Failed to save receipt",
-          variant: "destructive",
-        });
-      }
+  const handleOpenImage = (imageUrl: string | null) => {
+    if (!imageUrl) {
+      toast({ title: "No image available", variant: "destructive" });
+      return;
     }
+    
+    const { data } = supabase.storage.from('receipts').getPublicUrl(imageUrl);
+    window.open(data.publicUrl, "_blank");
   };
 
   const handleDelete = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this receipt?")) return;
+
+    // Delete matches first
+    await supabase.from("matches").delete().match({ receipt_id: id });
+    
     const { error } = await supabase.from("receipts").delete().eq("id", id);
 
     if (error) {
@@ -132,7 +114,49 @@ const Receipts = () => {
     fetchReceipts();
   };
 
-  const canDelete = orgRole === "owner" || orgRole === "admin";
+  const getReceiptStatus = (receipt: Receipt) => {
+    if (receipt.source?.toLowerCase().includes("cash")) {
+      return { label: "Matched (Cash)", variant: "default" as const };
+    }
+    if (matches[receipt.id]) {
+      return { label: "Matched", variant: "default" as const };
+    }
+    return { label: "Unmatched", variant: "secondary" as const };
+  };
+
+  // Filter receipts
+  const filteredReceipts = receipts.filter((receipt) => {
+    const matchesSearch = 
+      receipt.vendor.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      receipt.notes?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      receipt.source?.toLowerCase().includes(searchQuery.toLowerCase());
+
+    if (!matchesSearch) return false;
+
+    if (filterStatus === "matched") {
+      return receipt.source?.toLowerCase().includes("cash") || matches[receipt.id];
+    }
+    if (filterStatus === "unmatched") {
+      return !receipt.source?.toLowerCase().includes("cash") && !matches[receipt.id];
+    }
+    return true;
+  });
+
+  // Calculate totals
+  const totals = filteredReceipts.reduce(
+    (acc, r) => ({
+      count: acc.count + 1,
+      subtotal: acc.subtotal + (r.total - r.tax),
+      tax: acc.tax + r.tax,
+      total: acc.total + r.total,
+    }),
+    { count: 0, subtotal: 0, tax: 0, total: 0 }
+  );
+
+  const matchedCount = receipts.filter(r => 
+    r.source?.toLowerCase().includes("cash") || matches[r.id]
+  ).length;
+  const unmatchedCount = receipts.length - matchedCount;
 
   if (orgLoading) {
     return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
@@ -143,80 +167,148 @@ const Receipts = () => {
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold">Receipts</h1>
-          <p className="text-muted-foreground">Upload and manage your receipts</p>
+          <p className="text-muted-foreground">
+            Manage your receipts • {receipts.length} total • {matchedCount} matched • {unmatchedCount} unmatched
+          </p>
         </div>
 
-        {reviewData ? (
-          <ReceiptReview
-            data={reviewData}
-            onConfirm={handleConfirmReceipt}
-            onCancel={() => setReviewData(null)}
-          />
-        ) : (
-          <Card className="p-6">
-            {isProcessing ? (
-              <ProcessingState />
-            ) : (
-              <ReceiptUploader
-                onProcessingStart={() => setIsProcessing(true)}
-                onProcessingComplete={handleProcessingComplete}
-              />
-            )}
-          </Card>
-        )}
+        <Card className="p-6">
+          <h2 className="text-xl font-semibold mb-4">Upload Receipt</h2>
+          <ReceiptForm onSuccess={fetchReceipts} />
+        </Card>
 
         <Card className="p-6">
-          <h2 className="text-xl font-semibold mb-4">Recent Receipts</h2>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Date</TableHead>
-                <TableHead>Vendor</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Source</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
-                <TableHead>Status</TableHead>
-                {canDelete && <TableHead className="text-right">Actions</TableHead>}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {receipts.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={canDelete ? 7 : 6} className="text-center text-muted-foreground">
-                    No receipts yet. Upload one above to get started!
-                  </TableCell>
-                </TableRow>
-              ) : (
-                receipts.map((receipt) => (
-                  <TableRow key={receipt.id}>
-                    <TableCell>{new Date(receipt.receipt_date).toLocaleDateString()}</TableCell>
-                    <TableCell>{receipt.vendor}</TableCell>
-                    <TableCell>{receipt.category || "-"}</TableCell>
-                    <TableCell>{receipt.source || "-"}</TableCell>
-                    <TableCell className="text-right">${receipt.total.toFixed(2)}</TableCell>
-                    <TableCell>
-                      <Badge variant={receipt.reconciled ? "default" : "secondary"}>
-                        {receipt.reconciled ? "Matched" : "Unmatched"}
-                      </Badge>
-                    </TableCell>
-                    {canDelete && (
-                      <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleDelete(receipt.id)}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </TableCell>
-                    )}
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row gap-4">
+              <Input
+                placeholder="Search vendor, notes, or source..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="flex-1"
+              />
+              <Select value={filterStatus} onValueChange={setFilterStatus}>
+                <SelectTrigger className="w-full sm:w-48">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Receipts</SelectItem>
+                  <SelectItem value="matched">Matched</SelectItem>
+                  <SelectItem value="unmatched">Unmatched</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Vendor</TableHead>
+                    <TableHead>Total</TableHead>
+                    <TableHead>Tax</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead>Source</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Notes</TableHead>
+                    <TableHead>Actions</TableHead>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+                </TableHeader>
+                <TableBody>
+                  {filteredReceipts.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={9} className="text-center text-muted-foreground h-32">
+                        No receipts found
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredReceipts.map((receipt) => {
+                      const status = getReceiptStatus(receipt);
+                      return (
+                        <TableRow key={receipt.id}>
+                          <TableCell className="whitespace-nowrap">
+                            {new Date(receipt.receipt_date).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell>{receipt.vendor}</TableCell>
+                          <TableCell className="text-right">${receipt.total.toFixed(2)}</TableCell>
+                          <TableCell className="text-right">${receipt.tax.toFixed(2)}</TableCell>
+                          <TableCell>{receipt.category || "-"}</TableCell>
+                          <TableCell>{receipt.source || "-"}</TableCell>
+                          <TableCell>
+                            <Badge variant={status.variant}>{status.label}</Badge>
+                          </TableCell>
+                          <TableCell className="max-w-xs truncate">{receipt.notes || "-"}</TableCell>
+                          <TableCell>
+                            <div className="flex gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleOpenImage(receipt.image_url)}
+                                title="Open image"
+                              >
+                                <ExternalLink className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleMatchNow(receipt.id)}
+                                title="Match now"
+                              >
+                                <LinkIcon className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setEditingReceipt(receipt)}
+                                title="Edit"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleDelete(receipt.id)}
+                                title="Delete"
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="border-t pt-4 space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="font-medium">Total Receipts:</span>
+                <span>{totals.count}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="font-medium">Subtotal:</span>
+                <span>${totals.subtotal.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="font-medium">Tax:</span>
+                <span>${totals.tax.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-lg font-bold border-t pt-2">
+                <span>Total:</span>
+                <span>${totals.total.toFixed(2)}</span>
+              </div>
+            </div>
+          </div>
         </Card>
       </div>
+
+      <ReceiptEditDialog
+        receipt={editingReceipt}
+        open={!!editingReceipt}
+        onOpenChange={(open) => !open && setEditingReceipt(null)}
+        onSuccess={fetchReceipts}
+      />
     </Layout>
   );
 };

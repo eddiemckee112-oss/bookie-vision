@@ -5,3 +5,6 @@ verify_jwt = true
 
 [functions.process-csv-transactions]
 verify_jwt = true
+
+[functions.ai-suggest]
+verify_jwt = true
