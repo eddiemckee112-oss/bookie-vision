@@ -147,10 +147,17 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    console.error("Error:", error);
+    // Log full error details server-side only
+    console.error("Error processing CSV:", {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      timestamp: new Date().toISOString()
+    });
+    
+    // Return safe, generic error message to client
     return new Response(
       JSON.stringify({ 
-        error: error instanceof Error ? error.message : "Unknown error occurred" 
+        error: "Failed to process CSV transactions. Please check the file format and try again." 
       }),
       { 
         status: 500,
