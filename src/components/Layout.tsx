@@ -31,6 +31,7 @@ const Layout = ({ children }: { children: ReactNode }) => {
     { icon: Receipt, label: "Receipts", path: "/receipts" },
     { icon: CreditCard, label: "Transactions", path: "/transactions" },
     { icon: FileText, label: "Reports", path: "/reports" },
+    { icon: CreditCard, label: "Square", path: "/square" },
     { icon: Settings, label: "Settings", path: "/settings" },
   ];
 
