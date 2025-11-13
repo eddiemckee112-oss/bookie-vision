@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { UserPlus, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { emailSchema } from "@/lib/validations";
 
 interface OrgMember {
   id: string;
@@ -55,7 +56,11 @@ const Settings = () => {
       .eq("org_id", currentOrg.id);
 
     if (error) {
-      console.error("Error fetching members:", error);
+      toast({
+        title: "Error",
+        description: "Failed to load team members",
+        variant: "destructive",
+      });
       return;
     }
 
@@ -73,29 +78,41 @@ const Settings = () => {
     e.preventDefault();
     if (!currentOrg) return;
 
-    const { error } = await supabase.from("org_invites").insert({
-      org_id: currentOrg.id,
-      email: inviteEmail,
-      role: inviteRole,
-      invited_by: (await supabase.auth.getUser()).data.user?.id,
-    });
+    try {
+      // Validate email
+      const validatedEmail = emailSchema.parse(inviteEmail);
 
-    if (error) {
-      toast({
-        title: "Invite failed",
-        description: error.message,
-        variant: "destructive",
+      const { error } = await supabase.from("org_invites").insert({
+        org_id: currentOrg.id,
+        email: validatedEmail,
+        role: inviteRole,
+        invited_by: (await supabase.auth.getUser()).data.user?.id,
       });
-      return;
+
+      if (error) throw error;
+
+      toast({
+        title: "Invite sent!",
+        description: `Invitation sent to ${validatedEmail}`,
+      });
+
+      setInviteEmail("");
+      setInviteRole("staff");
+    } catch (error: any) {
+      if (error.name === "ZodError") {
+        toast({
+          title: "Invalid Email",
+          description: error.errors[0]?.message || "Please enter a valid email address",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Invite failed",
+          description: "Failed to send invitation",
+          variant: "destructive",
+        });
+      }
     }
-
-    toast({
-      title: "Invite sent!",
-      description: `Invitation sent to ${inviteEmail}`,
-    });
-
-    setInviteEmail("");
-    setInviteRole("staff");
   };
 
   const removeMember = async (memberId: string) => {

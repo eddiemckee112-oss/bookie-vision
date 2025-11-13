@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { useOrg } from "@/contexts/OrgContext";
+import { orgNameSchema } from "@/lib/validations";
 
 const Onboard = () => {
   const [orgName, setOrgName] = useState("");
@@ -20,13 +21,16 @@ const Onboard = () => {
     setLoading(true);
 
     try {
+      // Validate organization name
+      const validatedName = orgNameSchema.parse(orgName);
+
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
       // Create organization
       const { data: org, error: orgError } = await supabase
         .from("orgs")
-        .insert({ name: orgName })
+        .insert({ name: validatedName })
         .select()
         .single();
 
@@ -51,11 +55,19 @@ const Onboard = () => {
       await refreshOrgs();
       navigate("/dashboard");
     } catch (error: any) {
-      toast({
-        title: "Failed to create organization",
-        description: error.message,
-        variant: "destructive",
-      });
+      if (error.name === "ZodError") {
+        toast({
+          title: "Invalid Organization Name",
+          description: error.errors[0]?.message || "Please check your input",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Failed to create organization",
+          description: "Please try again",
+          variant: "destructive",
+        });
+      }
     } finally {
       setLoading(false);
     }

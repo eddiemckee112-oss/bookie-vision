@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Pencil, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
+import { receiptDataSchema } from "@/lib/validations";
 
 interface Receipt {
   id: string;
@@ -65,27 +66,43 @@ const Receipts = () => {
 
     if (!currentOrg) return;
 
-    // Save to database
-    const { error } = await supabase.from("receipts").insert({
-      org_id: currentOrg.id,
-      vendor: data.vendor,
-      receipt_date: data.date.split("T")[0],
-      total: data.total,
-      tax: data.tax || 0,
-      category: data.category,
-      source: data.paymentMethod,
-    });
+    try {
+      // Validate the receipt data
+      const validatedData = receiptDataSchema.parse(data);
 
-    if (error) {
-      toast({
-        title: "Error saving receipt",
-        description: error.message,
-        variant: "destructive",
+      const { error } = await supabase.from("receipts").insert({
+        org_id: currentOrg.id,
+        vendor: validatedData.vendor,
+        receipt_date: validatedData.date,
+        total: validatedData.total,
+        tax: validatedData.tax || 0,
+        category: validatedData.category,
+        source: validatedData.paymentMethod,
       });
-      return;
-    }
 
-    fetchReceipts();
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Receipt processed and saved",
+      });
+
+      fetchReceipts();
+    } catch (error: any) {
+      if (error.name === "ZodError") {
+        toast({
+          title: "Validation Error",
+          description: "Receipt data is invalid. Please try again.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to save receipt",
+          variant: "destructive",
+        });
+      }
+    }
   };
 
   const handleDelete = async (id: string) => {
