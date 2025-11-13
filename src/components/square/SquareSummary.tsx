@@ -29,15 +29,23 @@ const SquareSummary = ({ orgId }: SquareSummaryProps) => {
     const fetchSummary = async () => {
       setLoading(true);
       try {
-        // Fetch Square deposits (income)
+        // Fetch Square sales (income)
+        const { data: sales } = await supabase
+          .from("transactions")
+          .select("amount")
+          .eq("org_id", orgId)
+          .eq("institution", "Square")
+          .eq("category", "Income");
+
+        // Fetch Square deposits (transfers to bank)
         const { data: deposits } = await supabase
           .from("transactions")
           .select("amount")
           .eq("org_id", orgId)
           .eq("institution", "Square")
-          .eq("direction", "credit");
+          .eq("category", "Transfer");
 
-        // Fetch Square fees (expenses)
+        // Fetch Square fees
         const { data: fees } = await supabase
           .from("transactions")
           .select("amount")
@@ -45,29 +53,29 @@ const SquareSummary = ({ orgId }: SquareSummaryProps) => {
           .eq("institution", "Square")
           .eq("category", "Bank Fees");
 
-        // Fetch Square loan repayments
-        const { data: loanPayments } = await supabase
-          .from("transactions")
-          .select("amount")
-          .eq("org_id", orgId)
-          .eq("institution", "Square Loan")
-          .eq("category", "Loan Repayment");
+        // Fetch loan data
+        const { data: loans } = await supabase
+          .from("square_loans")
+          .select("outstanding_balance, total_repayments")
+          .eq("org_id", orgId);
 
         // Count total Square transactions
         const { count } = await supabase
           .from("transactions")
           .select("*", { count: "exact", head: true })
           .eq("org_id", orgId)
-          .eq("institution", "Square");
+          .or("institution.eq.Square,institution.eq.Square Capital");
 
-        const totalDeposits = deposits?.reduce((sum, t) => sum + Number(t.amount), 0) || 0;
+        const totalSales = sales?.reduce((sum, t) => sum + Number(t.amount), 0) || 0;
+        const totalDeposits = Math.abs(deposits?.reduce((sum, t) => sum + Number(t.amount), 0) || 0);
         const totalFees = Math.abs(fees?.reduce((sum, t) => sum + Number(t.amount), 0) || 0);
-        const loanRepayments = Math.abs(loanPayments?.reduce((sum, t) => sum + Number(t.amount), 0) || 0);
+        const loanBalance = loans?.reduce((sum, l) => sum + Number(l.outstanding_balance), 0) || 0;
+        const loanRepayments = loans?.reduce((sum, l) => sum + Number(l.total_repayments), 0) || 0;
 
         setSummary({
           totalDeposits,
           totalFees,
-          loanBalance: 0, // Would need a separate loan balance table to track this
+          loanBalance,
           loanRepayments,
           transactionCount: count || 0,
         });
@@ -103,7 +111,7 @@ const SquareSummary = ({ orgId }: SquareSummaryProps) => {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-medium text-muted-foreground">
-            Total Deposits
+            Bank Deposits
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -111,7 +119,7 @@ const SquareSummary = ({ orgId }: SquareSummaryProps) => {
             ${summary.totalDeposits.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </p>
           <p className="text-xs text-muted-foreground mt-1">
-            From Square payouts
+            Transferred to bank
           </p>
         </CardContent>
       </Card>
@@ -135,15 +143,15 @@ const SquareSummary = ({ orgId }: SquareSummaryProps) => {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-medium text-muted-foreground">
-            Loan Repayments
+            Loan Outstanding
           </CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-2xl font-bold">
-            ${summary.loanRepayments.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ${summary.loanBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </p>
           <p className="text-xs text-muted-foreground mt-1">
-            Square Capital payments
+            Repaid: ${summary.loanRepayments.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </p>
         </CardContent>
       </Card>

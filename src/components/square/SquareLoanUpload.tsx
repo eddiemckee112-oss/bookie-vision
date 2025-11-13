@@ -49,9 +49,13 @@ const SquareLoanUpload = ({ orgId, onComplete }: SquareLoanUploadProps) => {
 
         if (error) throw error;
 
+        const errorMsg = data.errors?.length > 0 
+          ? `Errors: ${data.errors.slice(0, 3).join('; ')}` 
+          : '';
+
         toast({
           title: "Success",
-          description: `Imported ${data.imported} loan transactions.`,
+          description: `Imported ${data.imported} loan records. Duplicates: ${data.duplicates || 0}, Skipped: ${data.skipped || 0}. ${errorMsg}`,
         });
 
         setFile(null);

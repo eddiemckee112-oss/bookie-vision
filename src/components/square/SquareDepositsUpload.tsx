@@ -49,9 +49,13 @@ const SquareDepositsUpload = ({ orgId, onComplete }: SquareDepositsUploadProps) 
 
         if (error) throw error;
 
+        const errorMsg = data.errors?.length > 0 
+          ? `Errors: ${data.errors.slice(0, 3).join('; ')}` 
+          : '';
+
         toast({
           title: "Success",
-          description: `Imported ${data.imported} deposit transactions. ${data.duplicates || 0} duplicates skipped.`,
+          description: `Imported ${data.imported} deposits. Duplicates: ${data.duplicates || 0}, Skipped: ${data.skipped || 0}. ${errorMsg}`,
         });
 
         setFile(null);
