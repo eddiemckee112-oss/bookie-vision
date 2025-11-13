@@ -121,47 +121,58 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
 
     setIsScanning(true);
     try {
-      // Upload to storage first
-      const timestamp = Date.now();
-      const fileExt = selectedFile.name.split('.').pop();
-      const filePath = `${currentOrg.id}/${timestamp}.${fileExt}`;
+      // Convert file to base64
+      const reader = new FileReader();
+      reader.readAsDataURL(selectedFile);
       
-      const { error: uploadError } = await supabase.storage
-        .from('receipts')
-        .upload(filePath, selectedFile);
+      reader.onloadend = async () => {
+        const base64String = reader.result as string;
 
-      if (uploadError) throw uploadError;
+        try {
+          // Call AI suggest function with base64 image
+          const { data, error } = await supabase.functions.invoke("ai-suggest", {
+            body: {
+              image: base64String,
+              hint_vendor: formData.vendor,
+              hint_amount: formData.total,
+              hint_date: formData.receipt_date?.toISOString(),
+              source: formData.source,
+            },
+          });
 
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('receipts')
-        .getPublicUrl(filePath);
+          if (error) throw error;
 
-      // Call AI suggest function
-      const { data, error } = await supabase.functions.invoke("ai-suggest", {
-        body: {
-          image_url: publicUrl,
-          hint_vendor: formData.vendor,
-          hint_amount: formData.total,
-          hint_date: formData.receipt_date?.toISOString(),
-          source: formData.source,
-        },
-      });
+          // Apply suggestions to form
+          if (data.vendor) setFormData(prev => ({ ...prev, vendor: data.vendor }));
+          if (data.date) setFormData(prev => ({ ...prev, receipt_date: new Date(data.date) }));
+          if (data.total) setFormData(prev => ({ ...prev, total: data.total.toString() }));
+          if (data.tax) setFormData(prev => ({ ...prev, tax: data.tax.toString() }));
+          if (data.category) setFormData(prev => ({ ...prev, category: data.category }));
+          if (data.source) setFormData(prev => ({ ...prev, source: data.source }));
 
-      if (error) throw error;
+          toast({
+            title: "AI Scan Complete",
+            description: "Receipt data extracted successfully. Please review and edit as needed.",
+          });
+        } catch (error: any) {
+          console.error("AI scan error:", error);
+          toast({
+            title: "AI Scan Failed",
+            description: error.message || "Failed to scan receipt with AI. Please enter details manually.",
+            variant: "destructive",
+          });
+        } finally {
+          setIsScanning(false);
+        }
+      };
 
-      // Apply suggestions to form
-      if (data.vendor) setFormData(prev => ({ ...prev, vendor: data.vendor }));
-      if (data.date) setFormData(prev => ({ ...prev, receipt_date: new Date(data.date) }));
-      if (data.total) setFormData(prev => ({ ...prev, total: data.total.toString() }));
-      if (data.tax) setFormData(prev => ({ ...prev, tax: data.tax.toString() }));
-      if (data.category) setFormData(prev => ({ ...prev, category: data.category }));
-      if (data.source) setFormData(prev => ({ ...prev, source: data.source }));
-
-      toast({
-        title: "AI Scan Complete",
-        description: "Receipt data extracted successfully. Please review and edit as needed.",
-      });
+      reader.onerror = () => {
+        toast({
+          title: "Failed to read file",
+          variant: "destructive",
+        });
+        setIsScanning(false);
+      };
     } catch (error: any) {
       console.error("AI scan error:", error);
       toast({
@@ -169,7 +180,6 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
         description: error.message || "Failed to scan receipt with AI. Please enter details manually.",
         variant: "destructive",
       });
-    } finally {
       setIsScanning(false);
     }
   };

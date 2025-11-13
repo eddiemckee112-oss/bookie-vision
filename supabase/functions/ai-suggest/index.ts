@@ -11,7 +11,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { image_url, hint_vendor, hint_amount, hint_date, source } = await req.json();
+    const { image, hint_vendor, hint_amount, hint_date, source } = await req.json();
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
@@ -44,9 +44,9 @@ Return ONLY a JSON object with these exact fields: vendor, date, total, tax, cat
         messages: [
           {
             role: "user",
-            content: [
+          content: [
               { type: "text", text: prompt },
-              { type: "image_url", image_url: { url: image_url } }
+              { type: "image_url", image_url: { url: image } }
             ]
           }
         ],
