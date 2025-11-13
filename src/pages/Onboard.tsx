@@ -24,28 +24,12 @@ const Onboard = () => {
       // Validate organization name
       const validatedName = orgNameSchema.parse(orgName);
 
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
-
-      // Create organization
-      const { data: org, error: orgError } = await supabase
-        .from("orgs")
-        .insert({ name: validatedName })
-        .select()
-        .single();
+      // Use backend function to create org and assign owner in one atomic operation
+      const { data: org, error: orgError } = await supabase.rpc("create_org", {
+        _name: validatedName,
+      });
 
       if (orgError) throw orgError;
-
-      // Add user as owner
-      const { error: userError } = await supabase
-        .from("org_users")
-        .insert({
-          org_id: org.id,
-          user_id: user.id,
-          role: "owner",
-        });
-
-      if (userError) throw userError;
 
       toast({
         title: "Organization created!",
@@ -64,7 +48,7 @@ const Onboard = () => {
       } else {
         toast({
           title: "Failed to create organization",
-          description: "Please try again",
+          description: error.message || "Please try again",
           variant: "destructive",
         });
       }

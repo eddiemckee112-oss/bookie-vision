@@ -552,6 +552,20 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      create_org: {
+        Args: { _name: string }
+        Returns: {
+          created_at: string | null
+          id: string
+          name: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "orgs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       get_user_role_in_org: {
         Args: { _org_id: string; _user_id: string }
         Returns: Database["public"]["Enums"]["user_role"]

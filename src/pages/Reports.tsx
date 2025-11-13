@@ -38,6 +38,17 @@ const Reports = () => {
     setSummary({ totalReceipts, debits, credits });
   };
 
+  const sanitizeCSV = (value: any) => {
+    if (!value) return '';
+    const str = String(value);
+    // Prepend single quote if starts with formula character to prevent CSV injection
+    if (/^[=+\-@|]/.test(str)) {
+      return "'" + str;
+    }
+    // Escape existing quotes
+    return str.replace(/"/g, '""');
+  };
+
   const exportData = async () => {
     if (!currentOrg) return;
 
@@ -58,7 +69,15 @@ const Reports = () => {
     const csv = [
       ["Date", "Vendor", "Category", "Source", "Total", "Tax", "Subtotal"].join(","),
       ...(data || []).map((r: any) =>
-        [r.receipt_date, r.vendor, r.category || "", r.source || "", r.total, r.tax, r.subtotal].join(",")
+        [
+          sanitizeCSV(r.receipt_date), 
+          sanitizeCSV(r.vendor), 
+          sanitizeCSV(r.category), 
+          sanitizeCSV(r.source), 
+          r.total, 
+          r.tax, 
+          r.subtotal
+        ].join(",")
       ),
     ].join("\n");
 
