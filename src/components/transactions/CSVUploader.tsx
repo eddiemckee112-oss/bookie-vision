@@ -40,11 +40,23 @@ const CSVUploader = ({ orgId, accountId, onUploadComplete }: CSVUploaderProps) =
     try {
       const csvText = await selectedFile.text();
 
+      // Fetch account name if accountId is provided
+      let accountName = undefined;
+      if (accountId) {
+        const { data: accountData } = await supabase
+          .from("accounts")
+          .select("name")
+          .eq("id", accountId)
+          .single();
+        accountName = accountData?.name;
+      }
+
       const { data, error } = await supabase.functions.invoke("process-csv-transactions", {
         body: {
           csvContent: csvText,
           orgId,
           accountId,
+          accountName,
         },
       });
 
