@@ -285,7 +285,7 @@ const Transactions = () => {
         toast({ 
           variant: "destructive", 
           title: "Auto match failed", 
-          description: error.message || "Please try again." 
+          description: "Unable to match transactions. Please try again." 
         });
         return;
       }
@@ -301,9 +301,10 @@ const Transactions = () => {
         fetchMatches(),
       ]);
     } catch (error: any) {
+      console.error("Auto match error:", error);
       toast({
         title: "Error during auto match",
-        description: error.message,
+        description: "An error occurred. Please try again.",
         variant: "destructive",
       });
     } finally {
