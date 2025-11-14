@@ -39,6 +39,19 @@ const TransactionRow = ({
   onUnlink,
   onUploadReceipt,
 }: TransactionRowProps) => {
+  // Check if this is a cash transaction
+  const isCashTransaction = () => {
+    const accountName = transaction.source_account_name?.toLowerCase() || "";
+    return accountName.includes("cash");
+  };
+
+  // Determine the status text
+  const getStatusText = () => {
+    if (isMatched) return "Matched";
+    if (isCashTransaction()) return "Logged (cash)";
+    return "Unmatched";
+  };
+
   return (
     <TableRow>
       <TableCell className="whitespace-nowrap">
@@ -68,7 +81,7 @@ const TransactionRow = ({
       </TableCell>
       <TableCell>
         <Badge variant={isMatched ? "default" : "secondary"}>
-          {isMatched ? "Matched" : "Unmatched"}
+          {getStatusText()}
         </Badge>
       </TableCell>
       <TableCell>
