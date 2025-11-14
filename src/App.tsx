@@ -14,6 +14,7 @@ import Dashboard from "./pages/Dashboard";
 import Receipts from "./pages/Receipts";
 import Transactions from "./pages/Transactions";
 import Reports from "./pages/Reports";
+import Rules from "./pages/Rules";
 import Settings from "./pages/Settings";
 import Team from "./pages/Team";
 import Square from "./pages/Square";
@@ -40,6 +41,7 @@ const App = () => (
             <Route path="/receipts" element={<Receipts />} />
             <Route path="/transactions" element={<Transactions />} />
             <Route path="/reports" element={<Reports />} />
+            <Route path="/rules" element={<Rules />} />
             <Route path="/square" element={<Square />} />
             <Route path="/team" element={<Team />} />
             <Route path="/settings" element={<Settings />} />
