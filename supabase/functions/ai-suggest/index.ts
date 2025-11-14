@@ -25,13 +25,14 @@ Deno.serve(async (req) => {
 - Tax amount
 - Category (choose from: Uncategorized, Income, Bank Fees, Fuel, Utilities, Phone/Internet, Insurance, Professional Fees, Software, Subscriptions, Repairs & Maintenance, Office, Meals & Entertainment, Travel, Lodging, Building Maintenance, Building Miscellaneous, Restaurant (Food & Supplies), Taxes, Other)
 - Source payment method
+- Notes (a brief descriptive note, e.g. "Shell - gas for delivery car" or "Sysco - food inventory")
 
 ${hint_vendor ? `Vendor hint: ${hint_vendor}` : ""}
 ${hint_amount ? `Amount hint: ${hint_amount}` : ""}
 ${hint_date ? `Date hint: ${hint_date}` : ""}
 ${source ? `Payment source: ${source}` : ""}
 
-Return ONLY a JSON object with these exact fields: vendor, date, total, tax, category, source`;
+Return ONLY a JSON object with these exact fields: vendor, date, total, tax, category, source, notes`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -63,7 +64,8 @@ Return ONLY a JSON object with these exact fields: vendor, date, total, tax, cat
                 total: { type: "number" },
                 tax: { type: "number" },
                 category: { type: "string" },
-                source: { type: "string" }
+                source: { type: "string" },
+                notes: { type: "string" }
               },
               required: ["vendor", "date", "total"],
               additionalProperties: false

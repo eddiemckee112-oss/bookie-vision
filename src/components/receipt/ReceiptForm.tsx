@@ -142,13 +142,14 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
 
           if (error) throw error;
 
-          // Apply suggestions to form
-          if (data.vendor) setFormData(prev => ({ ...prev, vendor: data.vendor }));
-          if (data.date) setFormData(prev => ({ ...prev, receipt_date: new Date(data.date) }));
-          if (data.total) setFormData(prev => ({ ...prev, total: data.total.toString() }));
-          if (data.tax) setFormData(prev => ({ ...prev, tax: data.tax.toString() }));
-          if (data.category) setFormData(prev => ({ ...prev, category: data.category }));
-          if (data.source) setFormData(prev => ({ ...prev, source: data.source }));
+          // Apply suggestions to form, only filling empty fields
+          if (data.vendor && !formData.vendor) setFormData(prev => ({ ...prev, vendor: data.vendor }));
+          if (data.date && !formData.receipt_date) setFormData(prev => ({ ...prev, receipt_date: new Date(data.date) }));
+          if (data.total && !formData.total) setFormData(prev => ({ ...prev, total: data.total.toString() }));
+          if (data.tax && !formData.tax) setFormData(prev => ({ ...prev, tax: data.tax.toString() }));
+          if (data.category && formData.category === "Uncategorized") setFormData(prev => ({ ...prev, category: data.category }));
+          if (data.source && !formData.source) setFormData(prev => ({ ...prev, source: data.source }));
+          if (data.notes && !formData.notes) setFormData(prev => ({ ...prev, notes: data.notes }));
 
           toast({
             title: "AI Scan Complete",
