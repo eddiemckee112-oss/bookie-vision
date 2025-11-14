@@ -46,6 +46,7 @@ const Transactions = () => {
   const [filterStatus, setFilterStatus] = useState("all");
   const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(null);
   const [isApplyingRules, setIsApplyingRules] = useState(false);
+  const [isAutoMatching, setIsAutoMatching] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -270,6 +271,46 @@ const Transactions = () => {
     }
   };
 
+  const handleAutoMatchStrict = async () => {
+    if (!currentOrg) return;
+
+    setIsAutoMatching(true);
+    try {
+      const { error } = await supabase.rpc("auto_match_strict" as any, {
+        p_org_id: currentOrg.id,
+      });
+
+      if (error) {
+        console.error("Auto match error:", error);
+        toast({ 
+          variant: "destructive", 
+          title: "Auto match failed", 
+          description: error.message || "Please try again." 
+        });
+        return;
+      }
+
+      toast({
+        title: "Auto match completed",
+        description: "Transactions have been matched with receipts",
+      });
+
+      // Refresh data to show updates
+      await Promise.all([
+        fetchTransactions(),
+        fetchMatches(),
+      ]);
+    } catch (error: any) {
+      toast({
+        title: "Error during auto match",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsAutoMatching(false);
+    }
+  };
+
   // Filter and search logic
   const getMatchedTransactionIds = () => {
     return new Set(matches.map(m => m.transaction_id));
@@ -334,6 +375,13 @@ const Transactions = () => {
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold">Transactions</h2>
               <div className="flex items-center gap-4">
+                <Button
+                  onClick={handleAutoMatchStrict}
+                  disabled={isAutoMatching}
+                  variant="outline"
+                >
+                  {isAutoMatching ? "Matching..." : "Auto Match"}
+                </Button>
                 <Button
                   onClick={handleApplyRules}
                   disabled={isApplyingRules}
