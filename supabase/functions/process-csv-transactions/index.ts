@@ -26,16 +26,59 @@ serve(async (req) => {
       throw new Error("Missing required parameters");
     }
 
+    // Validate CSV size (max 5MB)
+    const csvSizeBytes = new TextEncoder().encode(csvContent).length;
+    const maxSizeBytes = 5 * 1024 * 1024; // 5MB
+    if (csvSizeBytes > maxSizeBytes) {
+      return new Response(
+        JSON.stringify({ error: "CSV file too large. Maximum size is 5MB." }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY not configured");
     }
 
-    // Parse CSV
+    // Parse and validate CSV structure
     const lines = csvContent.split("\n").filter((line: string) => line.trim());
-    const headers = lines[0].split(",").map((h: string) => h.trim().toLowerCase());
+    
+    if (lines.length === 0) {
+      return new Response(
+        JSON.stringify({ error: "CSV file is empty" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validate row count (max 1000 rows)
+    const maxRows = 1000;
+    if (lines.length > maxRows + 1) { // +1 for header
+      return new Response(
+        JSON.stringify({ error: `CSV has too many rows. Maximum is ${maxRows} transactions.` }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Sanitize CSV content to prevent formula injection
+    const sanitizeCell = (cell: string): string => {
+      const trimmed = cell.trim();
+      // Remove leading characters that could indicate formulas
+      if (trimmed.length > 0 && ['=', '+', '-', '@', '\t', '\r'].includes(trimmed[0])) {
+        return "'" + trimmed; // Prefix with single quote to neutralize
+      }
+      return trimmed;
+    };
+
+    const sanitizedLines = lines.map(line => {
+      return line.split(',').map(sanitizeCell).join(',');
+    });
+    const sanitizedCsvContent = sanitizedLines.join('\n');
+    
+    const headers = sanitizedLines[0].split(",").map((h: string) => h.trim().toLowerCase());
     
     console.log("CSV Headers:", headers);
+    console.log("CSV rows:", lines.length - 1);
 
     // Call AI to categorize transactions
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
@@ -53,7 +96,7 @@ serve(async (req) => {
           },
           {
             role: "user",
-            content: `Parse this CSV data and extract transactions. Return structured data with proper categorization.\n\nCSV Data:\n${csvContent}`
+            content: `Parse this CSV data and extract transactions. Return structured data with proper categorization.\n\nCSV Data:\n${sanitizedCsvContent}`
           }
         ],
         tools: [
