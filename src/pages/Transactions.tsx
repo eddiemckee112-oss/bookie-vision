@@ -8,6 +8,7 @@ import TransactionFilters from "@/components/transactions/TransactionFilters";
 import TransactionSummary from "@/components/transactions/TransactionSummary";
 import TransactionRow from "@/components/transactions/TransactionRow";
 import BankSyncSection from "@/components/transactions/BankSyncSection";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
@@ -44,6 +45,7 @@ const Transactions = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(null);
+  const [isApplyingRules, setIsApplyingRules] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -179,6 +181,95 @@ const Transactions = () => {
     navigate("/receipts");
   };
 
+  const handleApplyRules = async () => {
+    if (!currentOrg) return;
+    
+    setIsApplyingRules(true);
+    try {
+      // Fetch vendor_rules and rules
+      const { data: vendorRules, error: vendorRulesError } = await supabase
+        .from("vendor_rules")
+        .select("*")
+        .eq("org_id", currentOrg.id);
+
+      const { data: rules, error: rulesError } = await supabase
+        .from("rules")
+        .select("*")
+        .eq("org_id", currentOrg.id)
+        .eq("enabled", true);
+
+      if (vendorRulesError) throw vendorRulesError;
+      if (rulesError) throw rulesError;
+
+      // Get uncategorized transactions
+      const uncategorizedTxns = transactions.filter(t => !t.category);
+      let updatedCount = 0;
+
+      for (const txn of uncategorizedTxns) {
+        let matchedRule = null;
+
+        // Try to match with vendor_rules first
+        if (vendorRules) {
+          for (const rule of vendorRules) {
+            const pattern = new RegExp(rule.vendor_pattern, "i");
+            const matchesVendor = txn.description.match(pattern) || txn.vendor_clean?.match(pattern);
+            const matchesDirection = !rule.direction_filter || rule.direction_filter === txn.direction;
+
+            if (matchesVendor && matchesDirection) {
+              matchedRule = {
+                category: rule.category,
+                source: rule.source || "vendor_rule",
+              };
+              break;
+            }
+          }
+        }
+
+        // Try to match with rules if no vendor_rule matched
+        if (!matchedRule && rules) {
+          for (const rule of rules) {
+            const pattern = new RegExp(rule.match_pattern, "i");
+            if (txn.description.match(pattern) || txn.vendor_clean?.match(pattern)) {
+              matchedRule = {
+                category: rule.default_category,
+                source: "rule",
+              };
+              break;
+            }
+          }
+        }
+
+        // Update transaction if a rule matched
+        if (matchedRule) {
+          const { error } = await supabase
+            .from("transactions")
+            .update({
+              category: matchedRule.category,
+              source: matchedRule.source,
+            })
+            .eq("id", txn.id);
+
+          if (!error) updatedCount++;
+        }
+      }
+
+      toast({
+        title: "Rules applied successfully",
+        description: `Updated ${updatedCount} transaction${updatedCount !== 1 ? "s" : ""}`,
+      });
+
+      fetchTransactions();
+    } catch (error: any) {
+      toast({
+        title: "Error applying rules",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsApplyingRules(false);
+    }
+  };
+
   // Filter and search logic
   const getMatchedTransactionIds = () => {
     return new Set(matches.map(m => m.transaction_id));
@@ -242,11 +333,20 @@ const Transactions = () => {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold">Transactions</h2>
-              <TransactionSummary
-                totalCount={transactions.length}
-                matchedCount={matchedCount}
-                unmatchedCount={unmatchedCount}
-              />
+              <div className="flex items-center gap-4">
+                <Button
+                  onClick={handleApplyRules}
+                  disabled={isApplyingRules}
+                  variant="outline"
+                >
+                  {isApplyingRules ? "Applying..." : "Apply Rules"}
+                </Button>
+                <TransactionSummary
+                  totalCount={transactions.length}
+                  matchedCount={matchedCount}
+                  unmatchedCount={unmatchedCount}
+                />
+              </div>
             </div>
 
             <TransactionFilters
