@@ -91,7 +91,7 @@ const TransactionRow = ({
               variant="default"
               size="sm"
               onClick={() => onLink(transaction.id)}
-              className="whitespace-nowrap"
+              className="whitespace-nowrap font-semibold shadow-sm"
             >
               <LinkIcon className="h-4 w-4 mr-1" />
               Link to this
@@ -101,7 +101,7 @@ const TransactionRow = ({
               variant="outline"
               size="sm"
               onClick={() => onUnlink(transaction.id)}
-              className="whitespace-nowrap"
+              className="whitespace-nowrap border-2 font-medium hover:bg-destructive hover:text-destructive-foreground hover:border-destructive"
             >
               <X className="h-4 w-4 mr-1" />
               Unlink
@@ -111,7 +111,7 @@ const TransactionRow = ({
               variant="outline"
               size="sm"
               onClick={onUploadReceipt}
-              className="whitespace-nowrap"
+              className="whitespace-nowrap border-2 font-medium bg-background"
             >
               <Upload className="h-4 w-4 mr-1" />
               Upload Receipt
