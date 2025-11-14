@@ -114,6 +114,17 @@ serve(async (req) => {
       },
     });
 
+    // Fetch account name if accountId is provided
+    let accountName = null;
+    if (accountId) {
+      const { data: accountData } = await supabase
+        .from("accounts")
+        .select("name")
+        .eq("id", accountId)
+        .single();
+      accountName = accountData?.name;
+    }
+
     // Insert transactions
     const transactionsToInsert = parsedData.transactions.map((txn: any) => ({
       org_id: orgId,
@@ -124,7 +135,8 @@ serve(async (req) => {
       direction: txn.amount >= 0 ? "credit" : "debit",
       category: txn.category || null,
       vendor_clean: txn.vendor || null,
-      imported_via: "csv_ai",
+      source_account_name: accountName || "CSV Import",
+      imported_via: "csv",
       imported_from: "lovable_upload"
     }));
 
