@@ -45,7 +45,7 @@ Return ONLY a JSON object with these exact fields: vendor, date, total, tax, cat
         messages: [
           {
             role: "user",
-          content: [
+            content: [
               { type: "text", text: prompt },
               { type: "image_url", image_url: { url: image } }
             ]
@@ -67,7 +67,7 @@ Return ONLY a JSON object with these exact fields: vendor, date, total, tax, cat
                 source: { type: "string" },
                 notes: { type: "string" }
               },
-              required: ["vendor", "date", "total"],
+              required: ["vendor", "date", "total", "category", "notes"],
               additionalProperties: false
             }
           }
