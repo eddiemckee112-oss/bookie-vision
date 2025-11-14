@@ -20,7 +20,7 @@ serve(async (req) => {
       );
     }
 
-    const { csvContent, orgId, accountId } = await req.json();
+    const { csvContent, orgId, accountId, accountName } = await req.json();
 
     if (!csvContent || !orgId) {
       throw new Error("Missing required parameters");
@@ -114,15 +114,15 @@ serve(async (req) => {
       },
     });
 
-    // Fetch account name if accountId is provided
-    let accountName = null;
-    if (accountId) {
+    // Use accountName from request body, or fetch from DB as fallback
+    let finalAccountName = accountName;
+    if (!finalAccountName && accountId) {
       const { data: accountData } = await supabase
         .from("accounts")
         .select("name")
         .eq("id", accountId)
         .single();
-      accountName = accountData?.name;
+      finalAccountName = accountData?.name;
     }
 
     // Insert transactions
@@ -135,7 +135,7 @@ serve(async (req) => {
       direction: txn.amount >= 0 ? "credit" : "debit",
       category: txn.category || null,
       vendor_clean: txn.vendor || null,
-      source_account_name: accountName || "CSV Import",
+      source_account_name: finalAccountName || "CSV Import",
       imported_via: "csv",
       imported_from: "lovable_upload"
     }));
