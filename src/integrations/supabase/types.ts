@@ -21,6 +21,7 @@ export type Database = {
           id: string
           name: string
           org_id: string | null
+          square_account_type: string | null
           type: string
         }
         Insert: {
@@ -29,6 +30,7 @@ export type Database = {
           id?: string
           name: string
           org_id?: string | null
+          square_account_type?: string | null
           type: string
         }
         Update: {
@@ -37,6 +39,7 @@ export type Database = {
           id?: string
           name?: string
           org_id?: string | null
+          square_account_type?: string | null
           type?: string
         }
         Relationships: [
@@ -166,6 +169,7 @@ export type Database = {
           org_id: string
           role: Database["public"]["Enums"]["user_role"]
           status: string | null
+          token: string | null
         }
         Insert: {
           created_at?: string | null
@@ -175,6 +179,7 @@ export type Database = {
           org_id: string
           role?: Database["public"]["Enums"]["user_role"]
           status?: string | null
+          token?: string | null
         }
         Update: {
           created_at?: string | null
@@ -184,6 +189,7 @@ export type Database = {
           org_id?: string
           role?: Database["public"]["Enums"]["user_role"]
           status?: string | null
+          token?: string | null
         }
         Relationships: [
           {
@@ -242,6 +248,27 @@ export type Database = {
           created_at?: string | null
           id?: string
           name?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          created_at: string | null
+          email: string
+          id: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          email: string
+          id: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          email?: string
+          id?: string
+          updated_at?: string | null
         }
         Relationships: []
       }
@@ -406,6 +433,56 @@ export type Database = {
           },
           {
             foreignKeyName: "rules_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "orgs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      square_loans: {
+        Row: {
+          created_at: string | null
+          id: string
+          interest_paid: number
+          loan_id: string
+          org_id: string
+          outstanding_balance: number
+          principal: number
+          start_date: string | null
+          status: string | null
+          total_repayments: number
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          interest_paid?: number
+          loan_id: string
+          org_id: string
+          outstanding_balance?: number
+          principal?: number
+          start_date?: string | null
+          status?: string | null
+          total_repayments?: number
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          interest_paid?: number
+          loan_id?: string
+          org_id?: string
+          outstanding_balance?: number
+          principal?: number
+          start_date?: string | null
+          status?: string | null
+          total_repayments?: number
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "square_loans_org_id_fkey"
             columns: ["org_id"]
             isOneToOne: false
             referencedRelation: "orgs"
