@@ -37,12 +37,7 @@ const CATEGORIES = [
   "Other",
 ];
 
-const SOURCES = [
-  "CIBC Bank Account",
-  "Rogers MasterCard",
-  "PC MasterCard",
-  "Cash",
-];
+const SOURCES = ["CIBC Bank Account", "Rogers MasterCard", "PC MasterCard", "Cash"];
 
 interface ReceiptFormData {
   vendor: string;
@@ -80,7 +75,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
     const file = acceptedFiles[0];
     if (file) {
       setSelectedFile(file);
-      
+
       if (file.type.startsWith("image/")) {
         const reader = new FileReader();
         reader.onloadend = () => {
@@ -121,18 +116,18 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
 
     setIsScanning(true);
     try {
-      // Convert file to base64
       const reader = new FileReader();
       reader.readAsDataURL(selectedFile);
-      
+
       reader.onloadend = async () => {
         const base64String = reader.result as string;
 
         try {
-          // Call AI suggest function with base64 image
-          const { data, error } = await supabase.functions.invoke("ai-suggest", {
+          // ✅ Call your deployed process-receipt function
+          const { data, error } = await supabase.functions.invoke("process-receipt", {
             body: {
               image: base64String,
+              // keep hints if you want to use them later in the function
               hint_vendor: formData.vendor,
               hint_amount: formData.total,
               hint_date: formData.receipt_date?.toISOString(),
@@ -142,14 +137,19 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
 
           if (error) throw error;
 
-          // Apply suggestions to form, only filling empty fields
-          if (data.vendor && !formData.vendor) setFormData(prev => ({ ...prev, vendor: data.vendor }));
-          if (data.date && !formData.receipt_date) setFormData(prev => ({ ...prev, receipt_date: new Date(data.date) }));
-          if (data.total && !formData.total) setFormData(prev => ({ ...prev, total: data.total.toString() }));
-          if (data.tax && !formData.tax) setFormData(prev => ({ ...prev, tax: data.tax.toString() }));
-          if (data.category && formData.category === "Uncategorized") setFormData(prev => ({ ...prev, category: data.category }));
-          if (data.source && !formData.source) setFormData(prev => ({ ...prev, source: data.source }));
-          if (data.notes && !formData.notes) setFormData(prev => ({ ...prev, notes: data.notes }));
+          const receipt = (data as any)?.receiptData ?? (data as any) ?? {};
+
+          setFormData((prev) => ({
+            ...prev,
+            vendor: prev.vendor || receipt.vendor || "",
+            receipt_date: prev.receipt_date || (receipt.date ? new Date(receipt.date) : prev.receipt_date),
+            total: prev.total || (receipt.total != null ? String(receipt.total) : prev.total),
+            tax: prev.tax || (receipt.tax != null ? String(receipt.tax) : prev.tax),
+            category:
+              prev.category && prev.category !== "Uncategorized" ? prev.category : receipt.category || prev.category,
+            source: prev.source || receipt.source || prev.source,
+            notes: prev.notes || receipt.notes || prev.notes,
+          }));
 
           toast({
             title: "AI Scan Complete",
@@ -159,7 +159,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
           console.error("AI scan error:", error);
           toast({
             title: "AI Scan Failed",
-            description: error.message || "Failed to scan receipt with AI. Please enter details manually.",
+            description: error?.message || "Failed to scan receipt with AI. Please enter details manually.",
             variant: "destructive",
           });
         } finally {
@@ -178,7 +178,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
       console.error("AI scan error:", error);
       toast({
         title: "AI Scan Failed",
-        description: error.message || "Failed to scan receipt with AI. Please enter details manually.",
+        description: error?.message || "Failed to scan receipt with AI. Please enter details manually.",
         variant: "destructive",
       });
       setIsScanning(false);
@@ -188,7 +188,6 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
   const handleUploadReceipt = async () => {
     if (!currentOrg) return;
 
-    // Validation
     if (!formData.vendor.trim()) {
       toast({ title: "Vendor is required", variant: "destructive" });
       return;
@@ -204,24 +203,20 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
 
     setIsUploading(true);
     try {
-      let imageUrl = null;
+      let imageUrl: string | null = null;
 
-      // Upload file if exists
       if (selectedFile) {
         const timestamp = Date.now();
-        const fileExt = selectedFile.name.split('.').pop();
+        const fileExt = selectedFile.name.split(".").pop();
         const filePath = `${currentOrg.id}/${timestamp}.${fileExt}`;
-        
-        const { error: uploadError } = await supabase.storage
-          .from('receipts')
-          .upload(filePath, selectedFile);
+
+        const { error: uploadError } = await supabase.storage.from("receipts").upload(filePath, selectedFile);
 
         if (!uploadError) {
           imageUrl = filePath;
         }
       }
 
-      // Insert receipt
       const { error } = await supabase.from("receipts").insert({
         org_id: currentOrg.id,
         vendor: formData.vendor.trim(),
@@ -247,7 +242,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
       console.error("Upload error:", error);
       toast({
         title: "Upload Failed",
-        description: error.message || "Failed to upload receipt",
+        description: error?.message || "Failed to upload receipt",
         variant: "destructive",
       });
     } finally {
@@ -263,18 +258,14 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
           {...getRootProps()}
           className={cn(
             "border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors",
-            isDragActive ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"
+            isDragActive ? "border-primary bg-primary/5" : "border-border hover:border-primary/50",
           )}
         >
           <input {...getInputProps()} accept="image/*,application/pdf" capture="environment" />
-          
+
           {preview ? (
             <div className="space-y-4">
-              <img
-                src={preview}
-                alt="Receipt preview"
-                className="max-h-48 mx-auto rounded-lg object-contain"
-              />
+              <img src={preview} alt="Receipt preview" className="max-h-48 mx-auto rounded-lg object-contain" />
               <p className="text-sm text-muted-foreground">{selectedFile?.name}</p>
             </div>
           ) : (
@@ -288,9 +279,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
                 <p className="text-lg font-medium">
                   {isDragActive ? "Drop your receipt here" : "Upload Receipt Image or PDF"}
                 </p>
-                <p className="text-sm text-muted-foreground">
-                  Drag & drop, click to browse, or use camera
-                </p>
+                <p className="text-sm text-muted-foreground">Drag & drop, click to browse, or use camera</p>
               </div>
             </div>
           )}
@@ -316,7 +305,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
           <Input
             id="vendor"
             value={formData.vendor}
-            onChange={(e) => setFormData(prev => ({ ...prev, vendor: e.target.value }))}
+            onChange={(e) => setFormData((prev) => ({ ...prev, vendor: e.target.value }))}
             placeholder="Enter vendor name"
           />
         </div>
@@ -329,7 +318,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
                 variant="outline"
                 className={cn(
                   "w-full justify-start text-left font-normal",
-                  !formData.receipt_date && "text-muted-foreground"
+                  !formData.receipt_date && "text-muted-foreground",
                 )}
               >
                 {formData.receipt_date ? format(formData.receipt_date, "PPP") : "Pick a date"}
@@ -339,7 +328,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
               <Calendar
                 mode="single"
                 selected={formData.receipt_date}
-                onSelect={(date) => setFormData(prev => ({ ...prev, receipt_date: date }))}
+                onSelect={(date) => setFormData((prev) => ({ ...prev, receipt_date: date }))}
                 initialFocus
                 className="pointer-events-auto"
               />
@@ -354,7 +343,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
             type="number"
             step="0.01"
             value={formData.total}
-            onChange={(e) => setFormData(prev => ({ ...prev, total: e.target.value }))}
+            onChange={(e) => setFormData((prev) => ({ ...prev, total: e.target.value }))}
             placeholder="0.00"
           />
         </div>
@@ -366,20 +355,25 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
             type="number"
             step="0.01"
             value={formData.tax}
-            onChange={(e) => setFormData(prev => ({ ...prev, tax: e.target.value }))}
+            onChange={(e) => setFormData((prev) => ({ ...prev, tax: e.target.value }))}
             placeholder="0.00"
           />
         </div>
 
         <div className="space-y-2">
           <Label htmlFor="category">Category</Label>
-          <Select value={formData.category} onValueChange={(value) => setFormData(prev => ({ ...prev, category: value }))}>
+          <Select
+            value={formData.category}
+            onValueChange={(value) => setFormData((prev) => ({ ...prev, category: value }))}
+          >
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {CATEGORIES.map((cat) => (
-                <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                <SelectItem key={cat} value={cat}>
+                  {cat}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -387,13 +381,18 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
 
         <div className="space-y-2">
           <Label htmlFor="source">Source</Label>
-          <Select value={formData.source} onValueChange={(value) => setFormData(prev => ({ ...prev, source: value }))}>
+          <Select
+            value={formData.source}
+            onValueChange={(value) => setFormData((prev) => ({ ...prev, source: value }))}
+          >
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {SOURCES.map((src) => (
-                <SelectItem key={src} value={src}>{src}</SelectItem>
+                <SelectItem key={src} value={src}>
+                  {src}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -404,7 +403,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
           <Textarea
             id="notes"
             value={formData.notes}
-            onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
+            onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))}
             placeholder="Additional notes..."
             rows={3}
           />
@@ -415,7 +414,9 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
         <Button onClick={handleUploadReceipt} disabled={isUploading} className="flex-1">
           {isUploading ? "Uploading..." : "Upload Receipt"}
         </Button>
-        <Button onClick={handleClear} variant="outline">Clear</Button>
+        <Button onClick={handleClear} variant="outline">
+          Clear
+        </Button>
       </div>
     </div>
   );
