@@ -47,7 +47,7 @@ const Receipts = () => {
 
   const fetchReceipts = async () => {
     if (!currentOrg) return;
-    
+
     const { data: receiptsData, error: receiptsError } = await supabase
       .from("receipts")
       .select("*")
@@ -65,11 +65,7 @@ const Receipts = () => {
 
     setReceipts(receiptsData || []);
 
-    // Fetch matches
-    const { data: matchesData } = await supabase
-      .from("matches")
-      .select("receipt_id")
-      .eq("org_id", currentOrg.id);
+    const { data: matchesData } = await supabase.from("matches").select("receipt_id").eq("org_id", currentOrg.id);
 
     const matchMap: Record<string, boolean> = {};
     matchesData?.forEach((m) => {
@@ -88,17 +84,17 @@ const Receipts = () => {
       toast({ title: "No image available", variant: "destructive" });
       return;
     }
-    
-    const { data } = supabase.storage.from('receipts').getPublicUrl(imageUrl);
+
+    // 🔁 Use receipts-warm bucket
+    const { data } = supabase.storage.from("receipts-warm").getPublicUrl(imageUrl);
     window.open(data.publicUrl, "_blank");
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm("Are you sure you want to delete this receipt?")) return;
 
-    // Delete matches first
     await supabase.from("matches").delete().match({ receipt_id: id });
-    
+
     const { error } = await supabase.from("receipts").delete().eq("id", id);
 
     if (error) {
@@ -124,9 +120,8 @@ const Receipts = () => {
     return { label: "Unmatched", variant: "secondary" as const };
   };
 
-  // Filter receipts
   const filteredReceipts = receipts.filter((receipt) => {
-    const matchesSearch = 
+    const matchesSearch =
       receipt.vendor.toLowerCase().includes(searchQuery.toLowerCase()) ||
       receipt.notes?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       receipt.source?.toLowerCase().includes(searchQuery.toLowerCase());
@@ -142,7 +137,6 @@ const Receipts = () => {
     return true;
   });
 
-  // Calculate totals
   const totals = filteredReceipts.reduce(
     (acc, r) => ({
       count: acc.count + 1,
@@ -150,12 +144,10 @@ const Receipts = () => {
       tax: acc.tax + r.tax,
       total: acc.total + r.total,
     }),
-    { count: 0, subtotal: 0, tax: 0, total: 0 }
+    { count: 0, subtotal: 0, tax: 0, total: 0 },
   );
 
-  const matchedCount = receipts.filter(r => 
-    r.source?.toLowerCase().includes("cash") || matches[r.id]
-  ).length;
+  const matchedCount = receipts.filter((r) => r.source?.toLowerCase().includes("cash") || matches[r.id]).length;
   const unmatchedCount = receipts.length - matchedCount;
 
   if (orgLoading) {
