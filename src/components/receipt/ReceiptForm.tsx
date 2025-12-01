@@ -123,11 +123,9 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
         const base64String = reader.result as string;
 
         try {
-          // ✅ Call your deployed process-receipt function
           const { data, error } = await supabase.functions.invoke("process-receipt", {
             body: {
               image: base64String,
-              // keep hints if you want to use them later in the function
               hint_vendor: formData.vendor,
               hint_amount: formData.total,
               hint_date: formData.receipt_date?.toISOString(),
@@ -210,7 +208,8 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
         const fileExt = selectedFile.name.split(".").pop();
         const filePath = `${currentOrg.id}/${timestamp}.${fileExt}`;
 
-        const { error: uploadError } = await supabase.storage.from("receipts").upload(filePath, selectedFile);
+        // 🔁 Use receipts-warm bucket
+        const { error: uploadError } = await supabase.storage.from("receipts-warm").upload(filePath, selectedFile);
 
         if (!uploadError) {
           imageUrl = filePath;
