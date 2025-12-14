@@ -20,6 +20,9 @@ interface OrgContextType {
 
 const OrgContext = createContext<OrgContextType | undefined>(undefined);
 
+// ✅ Your “real” org going forward:
+const PREFERRED_ORG_ID = "1507521f-8a02-4f0e-af9e-37cf6390f8b9"; // Kosmos Pizza Inc
+
 export const OrgProvider = ({ children }: { children: ReactNode }) => {
   const [currentOrg, setCurrentOrg] = useState<Org | null>(null);
   const [orgRole, setOrgRole] = useState<"owner" | "admin" | "staff" | null>(null);
@@ -41,9 +44,11 @@ export const OrgProvider = ({ children }: { children: ReactNode }) => {
     return orgUsers || [];
   };
 
-  // Pick the "best" org when multiple exist.
-  // We pick the org with the most transactions, because that’s where your data actually is.
   const pickBestOrgId = async (orgIds: string[]) => {
+    // 1) Prefer your real org explicitly if it exists in this user’s org list
+    if (orgIds.includes(PREFERRED_ORG_ID)) return PREFERRED_ORG_ID;
+
+    // 2) Otherwise pick org with most transactions
     const counts = await Promise.all(
       orgIds.map(async (id) => {
         const { count, error } = await supabase
@@ -83,7 +88,6 @@ export const OrgProvider = ({ children }: { children: ReactNode }) => {
     const orgsArray: Org[] = orgData.map((ou: any) => ou.orgs).filter(Boolean);
     setOrgs(orgsArray);
 
-    // Always resolve org deterministically (especially important when you belong to multiple orgs)
     const orgToSet = await resolveOrgToUse(orgsArray);
 
     if (orgToSet) {
@@ -115,7 +119,6 @@ export const OrgProvider = ({ children }: { children: ReactNode }) => {
   };
 
   useEffect(() => {
-    // Get initial session
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       const u = session?.user ?? null;
       setUser(u);
@@ -141,7 +144,6 @@ export const OrgProvider = ({ children }: { children: ReactNode }) => {
       setLoading(false);
     });
 
-    // Listen for auth changes
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -156,7 +158,6 @@ export const OrgProvider = ({ children }: { children: ReactNode }) => {
         return;
       }
 
-      // Re-fetch orgs after login
       setTimeout(async () => {
         const orgData = await fetchOrgs(u.id);
         const orgsArray: Org[] = orgData.map((ou: any) => ou.orgs).filter(Boolean);
