@@ -8,14 +8,6 @@ interface Org {
   created_at: string;
 }
 
-interface OrgUser {
-  id: string;
-  org_id: string;
-  user_id: string;
-  role: "owner" | "admin" | "staff";
-  created_at: string;
-}
-
 interface OrgContextType {
   currentOrg: Org | null;
   orgRole: "owner" | "admin" | "staff" | null;
@@ -42,109 +34,145 @@ export const OrgProvider = ({ children }: { children: ReactNode }) => {
       .eq("user_id", userId);
 
     if (error) {
-      if (import.meta.env.DEV) {
-        console.error("Error fetching orgs:", error);
-      }
+      if (import.meta.env.DEV) console.error("Error fetching orgs:", error);
       return [];
     }
 
     return orgUsers || [];
   };
 
+  // Pick the "best" org when multiple exist.
+  // We pick the org with the most transactions, because that’s where your data actually is.
+  const pickBestOrgId = async (orgIds: string[]) => {
+    const counts = await Promise.all(
+      orgIds.map(async (id) => {
+        const { count, error } = await supabase
+          .from("transactions")
+          .select("id", { count: "exact", head: true })
+          .eq("org_id", id);
+
+        if (error) {
+          if (import.meta.env.DEV) console.warn("Count tx error for org", id, error);
+          return { id, count: 0 };
+        }
+
+        return { id, count: count ?? 0 };
+      })
+    );
+
+    counts.sort((a, b) => (b.count ?? 0) - (a.count ?? 0));
+    return counts[0]?.id ?? orgIds[0];
+  };
+
+  const resolveOrgToUse = async (orgsArray: Org[]) => {
+    if (orgsArray.length === 0) return null;
+
+    const storedOrgId = localStorage.getItem("currentOrgId");
+    const storedIsValid = storedOrgId && orgsArray.some((o) => o.id === storedOrgId);
+
+    if (storedIsValid) return orgsArray.find((o) => o.id === storedOrgId) || orgsArray[0];
+
+    const bestOrgId = await pickBestOrgId(orgsArray.map((o) => o.id));
+    return orgsArray.find((o) => o.id === bestOrgId) || orgsArray[0];
+  };
+
   const refreshOrgs = async () => {
     if (!user) return;
+
     const orgData = await fetchOrgs(user.id);
-    const orgsArray = orgData.map((ou: any) => ou.orgs).filter(Boolean);
+    const orgsArray: Org[] = orgData.map((ou: any) => ou.orgs).filter(Boolean);
     setOrgs(orgsArray);
 
-    // Set current org if not set
-    if (!currentOrg && orgsArray.length > 0) {
-      const storedOrgId = localStorage.getItem("currentOrgId");
-      const orgToSet = storedOrgId
-        ? orgsArray.find((o: Org) => o.id === storedOrgId) || orgsArray[0]
-        : orgsArray[0];
+    // Always resolve org deterministically (especially important when you belong to multiple orgs)
+    const orgToSet = await resolveOrgToUse(orgsArray);
+
+    if (orgToSet) {
       setCurrentOrg(orgToSet);
-      
-      // Get role for this org
+      localStorage.setItem("currentOrgId", orgToSet.id);
+
       const orgUser = orgData.find((ou: any) => ou.org_id === orgToSet.id);
       setOrgRole(orgUser?.role || null);
+    } else {
+      setCurrentOrg(null);
+      setOrgRole(null);
     }
   };
 
   const switchOrg = (orgId: string) => {
     const org = orgs.find((o) => o.id === orgId);
-    if (org) {
-      setCurrentOrg(org);
-      localStorage.setItem("currentOrgId", orgId);
-      
-      // Update role
-      supabase
-        .from("org_users")
-        .select("role")
-        .eq("user_id", user?.id)
-        .eq("org_id", orgId)
-        .single()
-        .then(({ data }) => setOrgRole(data?.role || null));
-    }
+    if (!org) return;
+
+    setCurrentOrg(org);
+    localStorage.setItem("currentOrgId", orgId);
+
+    supabase
+      .from("org_users")
+      .select("role")
+      .eq("user_id", user?.id)
+      .eq("org_id", orgId)
+      .single()
+      .then(({ data }) => setOrgRole((data?.role as any) || null));
   };
 
   useEffect(() => {
     // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchOrgs(session.user.id).then((orgData) => {
-          const orgsArray = orgData.map((ou: any) => ou.orgs).filter(Boolean);
-          setOrgs(orgsArray);
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      const u = session?.user ?? null;
+      setUser(u);
 
-          if (orgsArray.length > 0) {
-            const storedOrgId = localStorage.getItem("currentOrgId");
-            const orgToSet = storedOrgId
-              ? orgsArray.find((o: Org) => o.id === storedOrgId) || orgsArray[0]
-              : orgsArray[0];
-            setCurrentOrg(orgToSet);
-            
-            const orgUser = orgData.find((ou: any) => ou.org_id === orgToSet.id);
-            setOrgRole(orgUser?.role || null);
-          }
-          setLoading(false);
-        });
-      } else {
+      if (!u) {
         setLoading(false);
+        return;
       }
+
+      const orgData = await fetchOrgs(u.id);
+      const orgsArray: Org[] = orgData.map((ou: any) => ou.orgs).filter(Boolean);
+      setOrgs(orgsArray);
+
+      const orgToSet = await resolveOrgToUse(orgsArray);
+      if (orgToSet) {
+        setCurrentOrg(orgToSet);
+        localStorage.setItem("currentOrgId", orgToSet.id);
+
+        const orgUser = orgData.find((ou: any) => ou.org_id === orgToSet.id);
+        setOrgRole(orgUser?.role || null);
+      }
+
+      setLoading(false);
     });
 
     // Listen for auth changes
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      
-      if (session?.user) {
-        setTimeout(() => {
-          fetchOrgs(session.user.id).then((orgData) => {
-            const orgsArray = orgData.map((ou: any) => ou.orgs).filter(Boolean);
-            setOrgs(orgsArray);
-            
-            if (orgsArray.length > 0 && !currentOrg) {
-              const storedOrgId = localStorage.getItem("currentOrgId");
-              const orgToSet = storedOrgId
-                ? orgsArray.find((o: Org) => o.id === storedOrgId) || orgsArray[0]
-                : orgsArray[0];
-              setCurrentOrg(orgToSet);
-              
-              const orgUser = orgData.find((ou: any) => ou.org_id === orgToSet.id);
-              setOrgRole(orgUser?.role || null);
-            }
-            setLoading(false);
-          });
-        }, 0);
-      } else {
+      const u = session?.user ?? null;
+      setUser(u);
+
+      if (!u) {
         setCurrentOrg(null);
         setOrgRole(null);
         setOrgs([]);
         setLoading(false);
+        return;
       }
+
+      // Re-fetch orgs after login
+      setTimeout(async () => {
+        const orgData = await fetchOrgs(u.id);
+        const orgsArray: Org[] = orgData.map((ou: any) => ou.orgs).filter(Boolean);
+        setOrgs(orgsArray);
+
+        const orgToSet = await resolveOrgToUse(orgsArray);
+        if (orgToSet) {
+          setCurrentOrg(orgToSet);
+          localStorage.setItem("currentOrgId", orgToSet.id);
+
+          const orgUser = orgData.find((ou: any) => ou.org_id === orgToSet.id);
+          setOrgRole(orgUser?.role || null);
+        }
+
+        setLoading(false);
+      }, 0);
     });
 
     return () => subscription.unsubscribe();
