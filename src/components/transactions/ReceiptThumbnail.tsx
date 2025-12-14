@@ -11,7 +11,9 @@ interface ReceiptThumbnailProps {
 const ReceiptThumbnail = ({ vendor, imageUrl, total }: ReceiptThumbnailProps) => {
   const handleOpenImage = () => {
     if (!imageUrl) return;
-    const { data } = supabase.storage.from('receipts').getPublicUrl(imageUrl);
+
+    // ✅ Correct bucket: receipts-warm
+    const { data } = supabase.storage.from("receipts-warm").getPublicUrl(imageUrl);
     window.open(data.publicUrl, "_blank");
   };
 
