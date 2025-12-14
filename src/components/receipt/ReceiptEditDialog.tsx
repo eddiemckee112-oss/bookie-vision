@@ -13,26 +13,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
 const CATEGORIES = [
-  "Uncategorized",
-  "Income",
-  "Bank Fees",
-  "Fuel",
-  "Utilities",
-  "Phone/Internet",
-  "Insurance",
-  "Professional Fees",
-  "Software",
-  "Subscriptions",
-  "Repairs & Maintenance",
-  "Office",
-  "Meals & Entertainment",
-  "Travel",
-  "Lodging",
-  "Building Maintenance",
-  "Building Miscellaneous",
-  "Restaurant (Food & Supplies)",
-  "Taxes",
-  "Other",
+  "Uncategorized", "Income", "Bank Fees", "Fuel", "Utilities", "Phone/Internet",
+  "Insurance", "Professional Fees", "Software", "Subscriptions", "Repairs & Maintenance",
+  "Office", "Meals & Entertainment", "Travel", "Lodging", "Building Maintenance",
+  "Building Miscellaneous", "Restaurant (Food & Supplies)", "Taxes", "Other",
 ];
 
 const SOURCES = ["CIBC Bank Account", "Rogers MasterCard", "PC MasterCard", "Cash"];
@@ -67,12 +51,11 @@ const ReceiptEditDialog = ({ receipt, open, onOpenChange, onSuccess }: ReceiptEd
   const [notes, setNotes] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
-  // ✅ IMPORTANT: Sync state whenever a new receipt is opened for editing
+  // ✅ THIS is the fix: when a new receipt is chosen for editing, populate the form.
   useEffect(() => {
     if (!open) return;
 
     if (!receipt) {
-      // If dialog opens without a receipt (shouldn’t happen, but keep safe defaults)
       setVendor("");
       setDate(undefined);
       setTotal("");
@@ -85,8 +68,8 @@ const ReceiptEditDialog = ({ receipt, open, onOpenChange, onSuccess }: ReceiptEd
 
     setVendor(receipt.vendor ?? "");
     setDate(receipt.receipt_date ? new Date(receipt.receipt_date) : undefined);
-    setTotal(typeof receipt.total === "number" ? String(receipt.total) : "");
-    setTax(typeof receipt.tax === "number" ? String(receipt.tax) : "");
+    setTotal(receipt.total !== null && receipt.total !== undefined ? String(receipt.total) : "");
+    setTax(receipt.tax !== null && receipt.tax !== undefined ? String(receipt.tax) : "");
     setCategory(receipt.category || "Uncategorized");
     setSource(receipt.source || SOURCES[0]);
     setNotes(receipt.notes || "");
@@ -102,8 +85,8 @@ const ReceiptEditDialog = ({ receipt, open, onOpenChange, onSuccess }: ReceiptEd
         .update({
           vendor: vendor.trim(),
           receipt_date: format(date, "yyyy-MM-dd"),
-          total: Number(total),
-          tax: Number(tax) || 0,
+          total: parseFloat(total),
+          tax: parseFloat(tax) || 0,
           category,
           source,
           notes: notes.trim() || null,
@@ -194,14 +177,10 @@ const ReceiptEditDialog = ({ receipt, open, onOpenChange, onSuccess }: ReceiptEd
           <div className="space-y-2">
             <Label>Category</Label>
             <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
+              <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 {CATEGORIES.map((cat) => (
-                  <SelectItem key={cat} value={cat}>
-                    {cat}
-                  </SelectItem>
+                  <SelectItem key={cat} value={cat}>{cat}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -210,14 +189,10 @@ const ReceiptEditDialog = ({ receipt, open, onOpenChange, onSuccess }: ReceiptEd
           <div className="space-y-2">
             <Label>Source</Label>
             <Select value={source} onValueChange={setSource}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
+              <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 {SOURCES.map((src) => (
-                  <SelectItem key={src} value={src}>
-                    {src}
-                  </SelectItem>
+                  <SelectItem key={src} value={src}>{src}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -225,13 +200,16 @@ const ReceiptEditDialog = ({ receipt, open, onOpenChange, onSuccess }: ReceiptEd
 
           <div className="space-y-2">
             <Label htmlFor="edit-notes">Notes</Label>
-            <Textarea id="edit-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+            <Textarea
+              id="edit-notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={3}
+            />
           </div>
 
           <div className="flex gap-2 justify-end">
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button onClick={handleSave} disabled={isSaving || !receipt || !date}>
               {isSaving ? "Saving..." : "Save Changes"}
             </Button>
