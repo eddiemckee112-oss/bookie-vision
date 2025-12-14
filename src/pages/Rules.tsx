@@ -12,6 +12,8 @@ import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { CATEGORIES } from "@/constants/categories";
 
 interface VendorRule {
   id: string;
@@ -31,7 +33,7 @@ const Rules = () => {
   const [editingRule, setEditingRule] = useState<VendorRule | null>(null);
   const [formData, setFormData] = useState({
     vendor_pattern: "",
-    category: "",
+    category: "Uncategorized",
     tax: "",
     auto_match: false,
     source: "",
@@ -58,11 +60,7 @@ const Rules = () => {
       .order("created_at", { ascending: false });
 
     if (error) {
-      toast({
-        title: "Error fetching rules",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "Error fetching rules", description: error.message, variant: "destructive" });
       return;
     }
 
@@ -76,7 +74,7 @@ const Rules = () => {
     const ruleData = {
       org_id: currentOrg.id,
       vendor_pattern: formData.vendor_pattern,
-      category: formData.category || null,
+      category: formData.category || "Uncategorized",
       tax: formData.tax ? parseFloat(formData.tax) : null,
       auto_match: formData.auto_match,
       source: formData.source || null,
@@ -85,16 +83,11 @@ const Rules = () => {
 
     try {
       if (editingRule) {
-        const { error } = await supabase
-          .from("vendor_rules")
-          .update(ruleData)
-          .eq("id", editingRule.id);
-
+        const { error } = await supabase.from("vendor_rules").update(ruleData).eq("id", editingRule.id);
         if (error) throw error;
         toast({ title: "Rule updated successfully" });
       } else {
         const { error } = await supabase.from("vendor_rules").insert(ruleData);
-
         if (error) throw error;
         toast({ title: "Rule created successfully" });
       }
@@ -104,11 +97,7 @@ const Rules = () => {
       resetForm();
       fetchRules();
     } catch (error: any) {
-      toast({
-        title: "Error saving rule",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "Error saving rule", description: error.message, variant: "destructive" });
     }
   };
 
@@ -116,7 +105,7 @@ const Rules = () => {
     setEditingRule(rule);
     setFormData({
       vendor_pattern: rule.vendor_pattern,
-      category: rule.category || "",
+      category: rule.category || "Uncategorized",
       tax: rule.tax?.toString() || "",
       auto_match: rule.auto_match,
       source: rule.source || "",
@@ -129,13 +118,8 @@ const Rules = () => {
     if (!confirm("Are you sure you want to delete this rule?")) return;
 
     const { error } = await supabase.from("vendor_rules").delete().eq("id", id);
-
     if (error) {
-      toast({
-        title: "Error deleting rule",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "Error deleting rule", description: error.message, variant: "destructive" });
       return;
     }
 
@@ -144,27 +128,18 @@ const Rules = () => {
   };
 
   const handleToggleAutoMatch = async (rule: VendorRule) => {
-    const { error } = await supabase
-      .from("vendor_rules")
-      .update({ auto_match: !rule.auto_match })
-      .eq("id", rule.id);
-
+    const { error } = await supabase.from("vendor_rules").update({ auto_match: !rule.auto_match }).eq("id", rule.id);
     if (error) {
-      toast({
-        title: "Error updating rule",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "Error updating rule", description: error.message, variant: "destructive" });
       return;
     }
-
     fetchRules();
   };
 
   const resetForm = () => {
     setFormData({
       vendor_pattern: "",
-      category: "",
+      category: "Uncategorized",
       tax: "",
       auto_match: false,
       source: "",
@@ -172,9 +147,7 @@ const Rules = () => {
     });
   };
 
-  if (orgLoading) {
-    return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
-  }
+  if (orgLoading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
 
   return (
     <Layout>
@@ -182,27 +155,31 @@ const Rules = () => {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold">Vendor Rules</h1>
-            <p className="text-muted-foreground">
-              Manage categorization rules for your transactions
-            </p>
+            <p className="text-muted-foreground">Manage categorization rules for your transactions</p>
           </div>
-          <Dialog open={isDialogOpen} onOpenChange={(open) => {
-            setIsDialogOpen(open);
-            if (!open) {
-              setEditingRule(null);
-              resetForm();
-            }
-          }}>
+
+          <Dialog
+            open={isDialogOpen}
+            onOpenChange={(open) => {
+              setIsDialogOpen(open);
+              if (!open) {
+                setEditingRule(null);
+                resetForm();
+              }
+            }}
+          >
             <DialogTrigger asChild>
               <Button>
                 <Plus className="mr-2 h-4 w-4" />
                 Add Rule
               </Button>
             </DialogTrigger>
+
             <DialogContent className="max-w-2xl">
               <DialogHeader>
                 <DialogTitle>{editingRule ? "Edit Rule" : "Create New Rule"}</DialogTitle>
               </DialogHeader>
+
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="grid gap-4">
                   <div>
@@ -215,15 +192,26 @@ const Rules = () => {
                       required
                     />
                   </div>
+
                   <div>
-                    <Label htmlFor="category">Category</Label>
-                    <Input
-                      id="category"
+                    <Label>Category</Label>
+                    <Select
                       value={formData.category}
-                      onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                      placeholder="e.g., Groceries, Office Supplies"
-                    />
+                      onValueChange={(v) => setFormData({ ...formData, category: v })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CATEGORIES.map((cat) => (
+                          <SelectItem key={cat} value={cat}>
+                            {cat}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
+
                   <div>
                     <Label htmlFor="tax">Tax Rate</Label>
                     <Input
@@ -235,15 +223,17 @@ const Rules = () => {
                       placeholder="e.g., 0.13"
                     />
                   </div>
+
                   <div>
                     <Label htmlFor="source">Source</Label>
                     <Input
                       id="source"
                       value={formData.source}
                       onChange={(e) => setFormData({ ...formData, source: e.target.value })}
-                      placeholder="e.g., manual, imported"
+                      placeholder="e.g., CIBC Bank Account"
                     />
                   </div>
+
                   <div>
                     <Label htmlFor="direction_filter">Direction Filter</Label>
                     <Input
@@ -253,6 +243,7 @@ const Rules = () => {
                       placeholder="e.g., debit, credit"
                     />
                   </div>
+
                   <div className="flex items-center space-x-2">
                     <Switch
                       id="auto_match"
@@ -262,6 +253,7 @@ const Rules = () => {
                     <Label htmlFor="auto_match">Auto-match</Label>
                   </div>
                 </div>
+
                 <div className="flex justify-end gap-2">
                   <Button
                     type="button"
@@ -274,9 +266,7 @@ const Rules = () => {
                   >
                     Cancel
                   </Button>
-                  <Button type="submit">
-                    {editingRule ? "Update" : "Create"}
-                  </Button>
+                  <Button type="submit">{editingRule ? "Update" : "Create"}</Button>
                 </div>
               </form>
             </DialogContent>
@@ -312,25 +302,14 @@ const Rules = () => {
                     <TableCell>{rule.source || "-"}</TableCell>
                     <TableCell>{rule.direction_filter || "-"}</TableCell>
                     <TableCell>
-                      <Switch
-                        checked={rule.auto_match}
-                        onCheckedChange={() => handleToggleAutoMatch(rule)}
-                      />
+                      <Switch checked={rule.auto_match} onCheckedChange={() => handleToggleAutoMatch(rule)} />
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleEdit(rule)}
-                        >
+                        <Button variant="ghost" size="icon" onClick={() => handleEdit(rule)}>
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleDelete(rule.id)}
-                        >
+                        <Button variant="ghost" size="icon" onClick={() => handleDelete(rule.id)}>
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
