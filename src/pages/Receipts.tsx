@@ -26,6 +26,8 @@ interface Receipt {
   image_url: string | null;
 }
 
+const BUCKET = "receipts-warm";
+
 const Receipts = () => {
   const { currentOrg, loading: orgLoading } = useOrg();
   const navigate = useNavigate();
@@ -65,7 +67,10 @@ const Receipts = () => {
 
     setReceipts(receiptsData || []);
 
-    const { data: matchesData } = await supabase.from("matches").select("receipt_id").eq("org_id", currentOrg.id);
+    const { data: matchesData } = await supabase
+      .from("matches")
+      .select("receipt_id")
+      .eq("org_id", currentOrg.id);
 
     const matchMap: Record<string, boolean> = {};
     matchesData?.forEach((m) => {
@@ -79,15 +84,39 @@ const Receipts = () => {
     navigate("/transactions");
   };
 
+  const resolveReceiptImageUrl = (imageUrl: string) => {
+    const trimmed = imageUrl.trim();
+
+    // ✅ If it's already a full URL, just use it (old app behavior)
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+
+    // ✅ If it's a storage-style path, build public URL properly
+    // Sometimes people accidentally store "receipts-warm/xxx.jpg" as the path.
+    // getPublicUrl expects the path INSIDE the bucket, so strip bucket prefix if present.
+    let path = trimmed;
+    if (path.startsWith(`${BUCKET}/`)) path = path.slice(BUCKET.length + 1);
+    if (path.startsWith(`/`)) path = path.slice(1);
+
+    const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+    return data.publicUrl;
+  };
+
   const handleOpenImage = (imageUrl: string | null) => {
     if (!imageUrl) {
       toast({ title: "No image available", variant: "destructive" });
       return;
     }
 
-    // 🔁 Use receipts-warm bucket
-    const { data } = supabase.storage.from("receipts-warm").getPublicUrl(imageUrl);
-    window.open(data.publicUrl, "_blank");
+    try {
+      const url = resolveReceiptImageUrl(imageUrl);
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch {
+      toast({
+        title: "Could not open image",
+        description: "Image link looks invalid or the file is missing in storage.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleDelete = async (id: string) => {
