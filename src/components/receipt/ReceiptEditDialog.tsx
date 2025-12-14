@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,10 +13,26 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
 const CATEGORIES = [
-  "Uncategorized", "Income", "Bank Fees", "Fuel", "Utilities", "Phone/Internet",
-  "Insurance", "Professional Fees", "Software", "Subscriptions", "Repairs & Maintenance",
-  "Office", "Meals & Entertainment", "Travel", "Lodging", "Building Maintenance",
-  "Building Miscellaneous", "Restaurant (Food & Supplies)", "Taxes", "Other",
+  "Uncategorized",
+  "Income",
+  "Bank Fees",
+  "Fuel",
+  "Utilities",
+  "Phone/Internet",
+  "Insurance",
+  "Professional Fees",
+  "Software",
+  "Subscriptions",
+  "Repairs & Maintenance",
+  "Office",
+  "Meals & Entertainment",
+  "Travel",
+  "Lodging",
+  "Building Maintenance",
+  "Building Miscellaneous",
+  "Restaurant (Food & Supplies)",
+  "Taxes",
+  "Other",
 ];
 
 const SOURCES = ["CIBC Bank Account", "Rogers MasterCard", "PC MasterCard", "Cash"];
@@ -41,14 +57,40 @@ interface ReceiptEditDialogProps {
 
 const ReceiptEditDialog = ({ receipt, open, onOpenChange, onSuccess }: ReceiptEditDialogProps) => {
   const { toast } = useToast();
-  const [vendor, setVendor] = useState(receipt?.vendor || "");
-  const [date, setDate] = useState<Date | undefined>(receipt ? new Date(receipt.receipt_date) : undefined);
-  const [total, setTotal] = useState(receipt?.total.toString() || "");
-  const [tax, setTax] = useState(receipt?.tax.toString() || "");
-  const [category, setCategory] = useState(receipt?.category || "Uncategorized");
-  const [source, setSource] = useState(receipt?.source || SOURCES[0]);
-  const [notes, setNotes] = useState(receipt?.notes || "");
+
+  const [vendor, setVendor] = useState("");
+  const [date, setDate] = useState<Date | undefined>(undefined);
+  const [total, setTotal] = useState("");
+  const [tax, setTax] = useState("");
+  const [category, setCategory] = useState("Uncategorized");
+  const [source, setSource] = useState(SOURCES[0]);
+  const [notes, setNotes] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+
+  // ✅ IMPORTANT: Sync state whenever a new receipt is opened for editing
+  useEffect(() => {
+    if (!open) return;
+
+    if (!receipt) {
+      // If dialog opens without a receipt (shouldn’t happen, but keep safe defaults)
+      setVendor("");
+      setDate(undefined);
+      setTotal("");
+      setTax("");
+      setCategory("Uncategorized");
+      setSource(SOURCES[0]);
+      setNotes("");
+      return;
+    }
+
+    setVendor(receipt.vendor ?? "");
+    setDate(receipt.receipt_date ? new Date(receipt.receipt_date) : undefined);
+    setTotal(typeof receipt.total === "number" ? String(receipt.total) : "");
+    setTax(typeof receipt.tax === "number" ? String(receipt.tax) : "");
+    setCategory(receipt.category || "Uncategorized");
+    setSource(receipt.source || SOURCES[0]);
+    setNotes(receipt.notes || "");
+  }, [receipt, open]);
 
   const handleSave = async () => {
     if (!receipt || !date) return;
@@ -60,8 +102,8 @@ const ReceiptEditDialog = ({ receipt, open, onOpenChange, onSuccess }: ReceiptEd
         .update({
           vendor: vendor.trim(),
           receipt_date: format(date, "yyyy-MM-dd"),
-          total: parseFloat(total),
-          tax: parseFloat(tax) || 0,
+          total: Number(total),
+          tax: Number(tax) || 0,
           category,
           source,
           notes: notes.trim() || null,
@@ -76,7 +118,7 @@ const ReceiptEditDialog = ({ receipt, open, onOpenChange, onSuccess }: ReceiptEd
     } catch (error: any) {
       toast({
         title: "Failed to update receipt",
-        description: error.message,
+        description: error?.message ?? "Unknown error",
         variant: "destructive",
       });
     } finally {
@@ -90,7 +132,7 @@ const ReceiptEditDialog = ({ receipt, open, onOpenChange, onSuccess }: ReceiptEd
         <DialogHeader>
           <DialogTitle>Edit Receipt</DialogTitle>
         </DialogHeader>
-        
+
         <div className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="edit-vendor">Vendor *</Label>
@@ -114,7 +156,13 @@ const ReceiptEditDialog = ({ receipt, open, onOpenChange, onSuccess }: ReceiptEd
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">
-                <Calendar mode="single" selected={date} onSelect={setDate} initialFocus className="pointer-events-auto" />
+                <Calendar
+                  mode="single"
+                  selected={date}
+                  onSelect={setDate}
+                  initialFocus
+                  className="pointer-events-auto"
+                />
               </PopoverContent>
             </Popover>
           </div>
@@ -122,22 +170,38 @@ const ReceiptEditDialog = ({ receipt, open, onOpenChange, onSuccess }: ReceiptEd
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="edit-total">Total *</Label>
-              <Input id="edit-total" type="number" step="0.01" value={total} onChange={(e) => setTotal(e.target.value)} />
+              <Input
+                id="edit-total"
+                type="number"
+                step="0.01"
+                value={total}
+                onChange={(e) => setTotal(e.target.value)}
+              />
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="edit-tax">Tax</Label>
-              <Input id="edit-tax" type="number" step="0.01" value={tax} onChange={(e) => setTax(e.target.value)} />
+              <Input
+                id="edit-tax"
+                type="number"
+                step="0.01"
+                value={tax}
+                onChange={(e) => setTax(e.target.value)}
+              />
             </div>
           </div>
 
           <div className="space-y-2">
             <Label>Category</Label>
             <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 {CATEGORIES.map((cat) => (
-                  <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                  <SelectItem key={cat} value={cat}>
+                    {cat}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -146,10 +210,14 @@ const ReceiptEditDialog = ({ receipt, open, onOpenChange, onSuccess }: ReceiptEd
           <div className="space-y-2">
             <Label>Source</Label>
             <Select value={source} onValueChange={setSource}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 {SOURCES.map((src) => (
-                  <SelectItem key={src} value={src}>{src}</SelectItem>
+                  <SelectItem key={src} value={src}>
+                    {src}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -161,8 +229,10 @@ const ReceiptEditDialog = ({ receipt, open, onOpenChange, onSuccess }: ReceiptEd
           </div>
 
           <div className="flex gap-2 justify-end">
-            <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={isSaving}>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSave} disabled={isSaving || !receipt || !date}>
               {isSaving ? "Saving..." : "Save Changes"}
             </Button>
           </div>
