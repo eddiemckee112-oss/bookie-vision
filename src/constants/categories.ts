@@ -1,0 +1,15 @@
+export const CATEGORIES = [
+  "Income",
+  "Food & Beverage",
+  "Restaurant Supplies",
+  "Cleaning Supplies",
+  "Tools & Equipment",
+  "Utilities",
+  "Rent",
+  "Payroll",
+  "Marketing",
+  "Repairs & Maintenance",
+  "Bank Fees",
+  "Taxes",
+  "Other",
+];
