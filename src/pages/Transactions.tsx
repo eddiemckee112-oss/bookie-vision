@@ -24,7 +24,7 @@ interface Transaction {
   description: string;
   vendor_clean: string | null;
   amount: number;
-  direction: string;
+  direction: string; // "debit" | "credit"
   category: string | null;
   source_account_name: string | null;
 }
@@ -43,32 +43,18 @@ interface LinkedReceipt {
 
 type DateMode = "this_month" | "last_month" | "month" | "range" | "all";
 
+type OrgCategory = {
+  id: string;
+  org_id: string;
+  name: string;
+  sort_order: number;
+  is_active: boolean;
+};
+
 const pad2 = (n: number) => String(n).padStart(2, "0");
 const firstDayOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
 const lastDayOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
 const toYMD = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-
-// Tight category list (accountant-friendly)
-const CATEGORY_OPTIONS = [
-  "Sales Income",
-  "Other Income",
-  "Restaurant Food & Supplies",
-  "Restaurant Supplies",
-  "Cleaning Supplies",
-  "Building Supplies",
-  "Tools & Equipment",
-  "General Supplies",
-  "Utilities",
-  "Rent / Lease",
-  "Insurance",
-  "Repairs & Maintenance",
-  "Payroll",
-  "Fuel / Auto",
-  "Software & Subscriptions",
-  "Professional Fees",
-  "Taxes & Government",
-  "Owner Draw / Personal",
-];
 
 const Transactions = () => {
   const { currentOrg, loading: orgLoading } = useOrg();
@@ -91,8 +77,16 @@ const Transactions = () => {
   const [startDate, setStartDate] = useState(() => toYMD(firstDayOfMonth(new Date())));
   const [endDate, setEndDate] = useState(() => toYMD(lastDayOfMonth(new Date())));
 
+  // per-row busy
   const [updatingCategoryId, setUpdatingCategoryId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // ✅ org categories (from DB)
+  const [orgCategories, setOrgCategories] = useState<OrgCategory[]>([]);
+  const [catLoading, setCatLoading] = useState(false);
+  const [showManageCats, setShowManageCats] = useState(false);
+  const [newCatName, setNewCatName] = useState("");
+  const [catSaving, setCatSaving] = useState(false);
 
   const dateWindow = useMemo(() => {
     const now = new Date();
@@ -126,8 +120,100 @@ const Transactions = () => {
 
     fetchTransactions();
     fetchMatches();
+    loadOrgCategories();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentOrg, orgLoading, navigate, dateMode, monthValue, startDate, endDate]);
+
+  const loadOrgCategories = async () => {
+    if (!currentOrg) return;
+    setCatLoading(true);
+
+    const { data, error } = await supabase
+      .from("org_categories")
+      .select("id,org_id,name,sort_order,is_active")
+      .eq("org_id", currentOrg.id)
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true });
+
+    setCatLoading(false);
+
+    if (error) {
+      toast({
+        title: "Could not load categories",
+        description: error.message,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setOrgCategories((data as any) || []);
+  };
+
+  const addCategory = async () => {
+    if (!currentOrg) return;
+
+    const name = newCatName.trim();
+    if (!name) {
+      toast({ title: "Category name is required", variant: "destructive" });
+      return;
+    }
+
+    setCatSaving(true);
+
+    const nextSort =
+      orgCategories.length > 0
+        ? Math.max(...orgCategories.map((c) => c.sort_order || 100)) + 10
+        : 100;
+
+    const { error } = await supabase.from("org_categories").insert({
+      org_id: currentOrg.id,
+      name,
+      sort_order: nextSort,
+      is_active: true,
+    });
+
+    setCatSaving(false);
+
+    if (error) {
+      toast({
+        title: "Failed to add category",
+        description: error.message,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setNewCatName("");
+    await loadOrgCategories();
+    toast({ title: "Category added" });
+  };
+
+  const deleteCategory = async (catId: string, name: string) => {
+    if (!currentOrg) return;
+
+    const ok = window.confirm(`Delete category "${name}"?\n\nTransactions will keep their text value, but the category won't show in the dropdown anymore.`);
+    if (!ok) return;
+
+    // hard delete keeps your list clean + allows re-add with same name later if you want
+    const { error } = await supabase
+      .from("org_categories")
+      .delete()
+      .eq("org_id", currentOrg.id)
+      .eq("id", catId);
+
+    if (error) {
+      toast({
+        title: "Failed to delete category",
+        description: error.message,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    await loadOrgCategories();
+    toast({ title: "Category deleted" });
+  };
 
   const fetchTransactions = async () => {
     if (!currentOrg) return;
@@ -139,7 +225,11 @@ const Transactions = () => {
     const { data, error } = await q.order("txn_date", { ascending: false }).limit(500);
 
     if (error) {
-      toast({ title: "Error fetching transactions", description: error.message, variant: "destructive" });
+      toast({
+        title: "Error fetching transactions",
+        description: error.message,
+        variant: "destructive",
+      });
       return;
     }
 
@@ -201,7 +291,11 @@ const Transactions = () => {
       .eq("org_id", currentOrg.id);
 
     if (error) {
-      toast({ title: "Failed to update category", description: error.message, variant: "destructive" });
+      toast({
+        title: "Failed to update category",
+        description: error.message,
+        variant: "destructive",
+      });
       setUpdatingCategoryId(null);
       return;
     }
@@ -226,7 +320,11 @@ const Transactions = () => {
       .eq("transaction_id", txnId);
 
     if (mErr) {
-      toast({ title: "Delete failed (matches)", description: mErr.message, variant: "destructive" });
+      toast({
+        title: "Delete failed (matches)",
+        description: mErr.message,
+        variant: "destructive",
+      });
       setDeletingId(null);
       return;
     }
@@ -238,16 +336,23 @@ const Transactions = () => {
       .eq("id", txnId);
 
     if (tErr) {
-      toast({ title: "Delete failed", description: tErr.message, variant: "destructive" });
+      toast({
+        title: "Delete failed",
+        description: tErr.message,
+        variant: "destructive",
+      });
       setDeletingId(null);
       return;
     }
 
     setTransactions((prev) => prev.filter((t) => t.id !== txnId));
     setMatches((prev) => prev.filter((m) => m.transaction_id !== txnId));
+
     toast({ title: "Transaction deleted" });
     setDeletingId(null);
   };
+
+  const categoryNames = useMemo(() => orgCategories.map((c) => c.name), [orgCategories]);
 
   const filteredTransactions = transactions.filter((t) => {
     const hay = `${t.description} ${t.vendor_clean ?? ""}`.toLowerCase();
@@ -291,6 +396,64 @@ const Transactions = () => {
         )}
 
         <Card className="p-6 space-y-4">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="text-sm text-muted-foreground">
+              Categories: <b>{orgCategories.length}</b>
+              {catLoading ? " (loading...)" : ""}
+            </div>
+
+            <Button variant="outline" onClick={() => setShowManageCats((v) => !v)}>
+              {showManageCats ? "Hide Category Manager" : "Manage Categories"}
+            </Button>
+          </div>
+
+          {showManageCats && (
+            <div className="rounded-md border p-4 space-y-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <input
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                  placeholder="Add a category (ex: Restaurant Food & Supplies)"
+                  value={newCatName}
+                  onChange={(e) => setNewCatName(e.target.value)}
+                />
+                <Button onClick={addCategory} disabled={catSaving}>
+                  {catSaving ? "Saving..." : "Add"}
+                </Button>
+                <Button variant="outline" onClick={loadOrgCategories}>
+                  Refresh
+                </Button>
+              </div>
+
+              {orgCategories.length === 0 ? (
+                <div className="text-sm text-muted-foreground">
+                  No categories yet. Add a few — these will power your transaction dropdown.
+                </div>
+              ) : (
+                <div className="grid gap-2">
+                  {orgCategories.map((c) => (
+                    <div key={c.id} className="flex items-center justify-between rounded-md border px-3 py-2">
+                      <div className="text-sm">
+                        <b>{c.name}</b>{" "}
+                        <span className="text-xs text-muted-foreground">({c.sort_order})</span>
+                      </div>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => deleteCategory(c.id, c.name)}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="text-xs text-muted-foreground">
+                Note: Deleting a category won’t delete transactions. It just removes the option from the dropdown.
+              </div>
+            </div>
+          )}
+
           <TransactionFilters
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
@@ -311,12 +474,27 @@ const Transactions = () => {
               Showing <b>{filteredTransactions.length}</b> transactions
             </div>
 
-            {/* Matching on hold */}
             <div className="flex gap-2">
-              <Button variant="outline" onClick={() => toast({ title: "Auto Match on hold" })}>
+              <Button
+                variant="outline"
+                onClick={() =>
+                  toast({
+                    title: "Auto Match (later)",
+                    description: "Finish importing months first.",
+                  })
+                }
+              >
                 Auto Match
               </Button>
-              <Button variant="outline" onClick={() => toast({ title: "Apply Rules on hold" })}>
+              <Button
+                variant="outline"
+                onClick={() =>
+                  toast({
+                    title: "Apply Rules (later)",
+                    description: "Finish importing months first.",
+                  })
+                }
+              >
                 Apply Rules
               </Button>
             </div>
@@ -350,6 +528,10 @@ const Transactions = () => {
                     const matched = isTxnMatched(txn.id);
                     const receipt = getLinkedReceiptForTxn(txn.id);
 
+                    // if txn has a legacy category not in the org list, include it so it doesn't "disappear"
+                    const legacyCategory =
+                      txn.category && !categoryNames.includes(txn.category) ? txn.category : null;
+
                     return (
                       <TableRow key={txn.id}>
                         <TableCell className="whitespace-nowrap">{txn.txn_date}</TableCell>
@@ -371,8 +553,8 @@ const Transactions = () => {
                           </span>
                         </TableCell>
 
-                        {/* ✅ Plain HTML select (no extra UI dependency) */}
-                        <TableCell className="min-w-[220px]">
+                        {/* ✅ Category dropdown comes from org_categories */}
+                        <TableCell className="min-w-[240px]">
                           <select
                             className="h-9 w-full rounded-md border bg-background px-3 text-sm"
                             value={txn.category ?? ""}
@@ -380,9 +562,14 @@ const Transactions = () => {
                             onChange={(e) => updateCategory(txn.id, e.target.value || null)}
                           >
                             <option value="">Uncategorized</option>
-                            {CATEGORY_OPTIONS.map((c) => (
-                              <option key={c} value={c}>
-                                {c}
+
+                            {legacyCategory ? (
+                              <option value={legacyCategory}>{legacyCategory} (legacy)</option>
+                            ) : null}
+
+                            {orgCategories.map((c) => (
+                              <option key={c.id} value={c.name}>
+                                {c.name}
                               </option>
                             ))}
                           </select>
