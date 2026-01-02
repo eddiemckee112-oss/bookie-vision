@@ -17,13 +17,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 interface Transaction {
   id: string;
@@ -31,7 +24,7 @@ interface Transaction {
   description: string;
   vendor_clean: string | null;
   amount: number;
-  direction: string; // "debit" | "credit"
+  direction: string;
   category: string | null;
   source_account_name: string | null;
 }
@@ -51,14 +44,11 @@ interface LinkedReceipt {
 type DateMode = "this_month" | "last_month" | "month" | "range" | "all";
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
-
 const firstDayOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
 const lastDayOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
-
 const toYMD = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 
-// ✅ Tight category list (accountant-friendly)
-// You can tweak these labels anytime.
+// Tight category list (accountant-friendly)
 const CATEGORY_OPTIONS = [
   "Sales Income",
   "Other Income",
@@ -92,19 +82,15 @@ const Transactions = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
 
-  // Linking flow (keep this for later matching)
-  const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(null);
-
-  // ✅ date filtering
+  // date filtering
   const [dateMode, setDateMode] = useState<DateMode>("this_month");
   const [monthValue, setMonthValue] = useState(() => {
     const now = new Date();
-    return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`; // YYYY-MM
+    return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`;
   });
   const [startDate, setStartDate] = useState(() => toYMD(firstDayOfMonth(new Date())));
   const [endDate, setEndDate] = useState(() => toYMD(lastDayOfMonth(new Date())));
 
-  // ✅ per-row busy states
   const [updatingCategoryId, setUpdatingCategoryId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -114,31 +100,21 @@ const Transactions = () => {
     if (dateMode === "all") return { from: null as string | null, to: null as string | null };
 
     if (dateMode === "this_month") {
-      const from = toYMD(firstDayOfMonth(now));
-      const to = toYMD(lastDayOfMonth(now));
-      return { from, to };
+      return { from: toYMD(firstDayOfMonth(now)), to: toYMD(lastDayOfMonth(now)) };
     }
 
     if (dateMode === "last_month") {
-      const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const from = toYMD(firstDayOfMonth(lastMonth));
-      const to = toYMD(lastDayOfMonth(lastMonth));
-      return { from, to };
+      const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      return { from: toYMD(firstDayOfMonth(lm)), to: toYMD(lastDayOfMonth(lm)) };
     }
 
     if (dateMode === "month") {
       const [y, m] = monthValue.split("-").map(Number);
       const d = new Date(y, (m || 1) - 1, 1);
-      const from = toYMD(firstDayOfMonth(d));
-      const to = toYMD(lastDayOfMonth(d));
-      return { from, to };
+      return { from: toYMD(firstDayOfMonth(d)), to: toYMD(lastDayOfMonth(d)) };
     }
 
-    // range
-    return {
-      from: startDate || null,
-      to: endDate || null,
-    };
+    return { from: startDate || null, to: endDate || null };
   }, [dateMode, monthValue, startDate, endDate]);
 
   useEffect(() => {
@@ -147,10 +123,6 @@ const Transactions = () => {
       navigate("/onboard");
       return;
     }
-
-    // keep existing "link receipt -> go to transactions" flow
-    const linkReceiptId = sessionStorage.getItem("linkReceipt");
-    if (linkReceiptId) setSelectedReceiptId(linkReceiptId);
 
     fetchTransactions();
     fetchMatches();
@@ -161,18 +133,13 @@ const Transactions = () => {
     if (!currentOrg) return;
 
     let q = supabase.from("transactions").select("*").eq("org_id", currentOrg.id);
-
     if (dateWindow.from) q = q.gte("txn_date", dateWindow.from);
     if (dateWindow.to) q = q.lte("txn_date", dateWindow.to);
 
     const { data, error } = await q.order("txn_date", { ascending: false }).limit(500);
 
     if (error) {
-      toast({
-        title: "Error fetching transactions",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "Error fetching transactions", description: error.message, variant: "destructive" });
       return;
     }
 
@@ -202,11 +169,9 @@ const Transactions = () => {
         .in("id", receiptIds);
 
       if (!receiptsError && receiptsData) {
-        const receiptsMap: Record<string, LinkedReceipt> = {};
-        receiptsData.forEach((receipt: any) => {
-          receiptsMap[receipt.id] = receipt;
-        });
-        setLinkedReceipts(receiptsMap);
+        const map: Record<string, LinkedReceipt> = {};
+        receiptsData.forEach((r: any) => (map[r.id] = r));
+        setLinkedReceipts(map);
       }
     }
   };
@@ -220,12 +185,10 @@ const Transactions = () => {
   };
 
   const handleUploadReceipt = (txnId?: string) => {
-    // Optional: you can use this later if you want the receipts page to “know” which txn you came from.
     if (txnId) sessionStorage.setItem("linkTransaction", txnId);
     navigate("/receipts");
   };
 
-  // ✅ Edit category (updates DB + updates UI)
   const updateCategory = async (txnId: string, newCategory: string | null) => {
     if (!currentOrg) return;
 
@@ -238,23 +201,15 @@ const Transactions = () => {
       .eq("org_id", currentOrg.id);
 
     if (error) {
-      toast({
-        title: "Failed to update category",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "Failed to update category", description: error.message, variant: "destructive" });
       setUpdatingCategoryId(null);
       return;
     }
 
-    setTransactions((prev) =>
-      prev.map((t) => (t.id === txnId ? { ...t, category: newCategory } : t)),
-    );
-
+    setTransactions((prev) => prev.map((t) => (t.id === txnId ? { ...t, category: newCategory } : t)));
     setUpdatingCategoryId(null);
   };
 
-  // ✅ Delete transaction (deletes match row first to avoid FK issues)
   const deleteTransaction = async (txnId: string) => {
     if (!currentOrg) return;
 
@@ -263,7 +218,7 @@ const Transactions = () => {
 
     setDeletingId(txnId);
 
-    // 1) delete any match rows first (safe even if none exist)
+    // delete matches first (safe even if none exist)
     const { error: mErr } = await supabase
       .from("matches")
       .delete()
@@ -271,16 +226,11 @@ const Transactions = () => {
       .eq("transaction_id", txnId);
 
     if (mErr) {
-      toast({
-        title: "Delete failed (matches)",
-        description: mErr.message,
-        variant: "destructive",
-      });
+      toast({ title: "Delete failed (matches)", description: mErr.message, variant: "destructive" });
       setDeletingId(null);
       return;
     }
 
-    // 2) delete the transaction
     const { error: tErr } = await supabase
       .from("transactions")
       .delete()
@@ -288,19 +238,13 @@ const Transactions = () => {
       .eq("id", txnId);
 
     if (tErr) {
-      toast({
-        title: "Delete failed",
-        description: tErr.message,
-        variant: "destructive",
-      });
+      toast({ title: "Delete failed", description: tErr.message, variant: "destructive" });
       setDeletingId(null);
       return;
     }
 
-    // 3) remove from UI
     setTransactions((prev) => prev.filter((t) => t.id !== txnId));
     setMatches((prev) => prev.filter((m) => m.transaction_id !== txnId));
-
     toast({ title: "Transaction deleted" });
     setDeletingId(null);
   };
@@ -367,28 +311,12 @@ const Transactions = () => {
               Showing <b>{filteredTransactions.length}</b> transactions
             </div>
 
+            {/* Matching on hold */}
             <div className="flex gap-2">
-              {/* Matching on hold - keep buttons optional (you can ignore them) */}
-              <Button
-                variant="outline"
-                onClick={() =>
-                  toast({
-                    title: "Auto Match is on hold",
-                    description: "We’ll do matching after you import a few months.",
-                  })
-                }
-              >
+              <Button variant="outline" onClick={() => toast({ title: "Auto Match on hold" })}>
                 Auto Match
               </Button>
-              <Button
-                variant="outline"
-                onClick={() =>
-                  toast({
-                    title: "Apply Rules is on hold",
-                    description: "We’ll do rules after you import a few months.",
-                  })
-                }
-              >
+              <Button variant="outline" onClick={() => toast({ title: "Apply Rules on hold" })}>
                 Apply Rules
               </Button>
             </div>
@@ -443,30 +371,24 @@ const Transactions = () => {
                           </span>
                         </TableCell>
 
-                        {/* ✅ Editable category */}
+                        {/* ✅ Plain HTML select (no extra UI dependency) */}
                         <TableCell className="min-w-[220px]">
-                          <Select
+                          <select
+                            className="h-9 w-full rounded-md border bg-background px-3 text-sm"
                             value={txn.category ?? ""}
-                            onValueChange={(v) => updateCategory(txn.id, v || null)}
                             disabled={updatingCategoryId === txn.id}
+                            onChange={(e) => updateCategory(txn.id, e.target.value || null)}
                           >
-                            <SelectTrigger className="h-9">
-                              <SelectValue placeholder="Uncategorized" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="">Uncategorized</SelectItem>
-                              {CATEGORY_OPTIONS.map((c) => (
-                                <SelectItem key={c} value={c}>
-                                  {c}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                            <option value="">Uncategorized</option>
+                            {CATEGORY_OPTIONS.map((c) => (
+                              <option key={c} value={c}>
+                                {c}
+                              </option>
+                            ))}
+                          </select>
                         </TableCell>
 
-                        <TableCell className="whitespace-nowrap">
-                          {txn.source_account_name || "—"}
-                        </TableCell>
+                        <TableCell className="whitespace-nowrap">{txn.source_account_name || "—"}</TableCell>
 
                         <TableCell className="whitespace-nowrap">
                           {receipt ? (
@@ -486,14 +408,9 @@ const Transactions = () => {
                           </span>
                         </TableCell>
 
-                        {/* ✅ Actions: Upload Receipt + Delete (last column) */}
                         <TableCell className="text-right whitespace-nowrap">
                           <div className="flex justify-end gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleUploadReceipt(txn.id)}
-                            >
+                            <Button variant="outline" size="sm" onClick={() => handleUploadReceipt(txn.id)}>
                               Upload Receipt
                             </Button>
 
