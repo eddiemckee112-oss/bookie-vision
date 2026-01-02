@@ -1,3 +1,5 @@
+// src/pages/Transactions.tsx
+
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -8,9 +10,15 @@ import TransactionFilters from "@/components/transactions/TransactionFilters";
 import TransactionSummary from "@/components/transactions/TransactionSummary";
 import TransactionRow from "@/components/transactions/TransactionRow";
 import BankSyncSection from "@/components/transactions/BankSyncSection";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 
 interface Transaction {
@@ -43,7 +51,8 @@ const pad2 = (n: number) => String(n).padStart(2, "0");
 const firstDayOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
 const lastDayOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
 
-const toYMD = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const toYMD = (d: Date) =>
+  `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 
 const Transactions = () => {
   const { currentOrg, loading: orgLoading } = useOrg();
@@ -130,9 +139,7 @@ const Transactions = () => {
     if (dateWindow.from) q = q.gte("txn_date", dateWindow.from);
     if (dateWindow.to) q = q.lte("txn_date", dateWindow.to);
 
-    const { data, error } = await q
-      .order("txn_date", { ascending: false })
-      .limit(500);
+    const { data, error } = await q.order("txn_date", { ascending: false }).limit(500);
 
     if (error) {
       toast({
@@ -143,7 +150,7 @@ const Transactions = () => {
       return;
     }
 
-    setTransactions(data || []);
+    setTransactions((data as Transaction[]) || []);
   };
 
   const fetchMatches = async () => {
@@ -159,7 +166,7 @@ const Transactions = () => {
       return;
     }
 
-    setMatches(matchesData || []);
+    setMatches((matchesData as Match[]) || []);
 
     const receiptIds = matchesData?.map((m) => m.receipt_id) || [];
     if (receiptIds.length > 0) {
@@ -170,7 +177,7 @@ const Transactions = () => {
 
       if (!receiptsError && receiptsData) {
         const receiptsMap: Record<string, LinkedReceipt> = {};
-        receiptsData.forEach((receipt) => {
+        (receiptsData as LinkedReceipt[]).forEach((receipt) => {
           receiptsMap[receipt.id] = receipt;
         });
         setLinkedReceipts(receiptsMap);
@@ -238,13 +245,9 @@ const Transactions = () => {
     navigate("/receipts");
   };
 
-  // (keeping your existing apply rules + auto match logic below unchanged)
-  // If you want, we can also make apply rules/auto match operate only on the current date window.
-
   const filteredTransactions = transactions.filter((t) => {
     const hay = `${t.description} ${t.vendor_clean ?? ""}`.toLowerCase();
     const matchesSearch = hay.includes(searchQuery.toLowerCase());
-
     if (!matchesSearch) return false;
 
     const isMatched = matches.some((m) => m.transaction_id === t.id);
@@ -253,7 +256,6 @@ const Transactions = () => {
     if (filterStatus === "unmatched") return !isMatched;
 
     if (filterStatus === "recent") {
-      // simple "recent" = last 30 days within your current window
       const d = new Date(t.txn_date);
       const cutoff = new Date();
       cutoff.setDate(cutoff.getDate() - 30);
@@ -305,8 +307,12 @@ const Transactions = () => {
             transactions={filteredTransactions as any}
             matches={matches as any}
             onUploadReceipt={handleUploadReceipt}
-            onApplyRules={() => toast({ title: "Apply Rules is still wired in your file below (left unchanged)" })}
-            onAutoMatch={() => toast({ title: "Auto Match is still wired in your file below (left unchanged)" })}
+            onApplyRules={() =>
+              toast({ title: "Apply Rules is still wired in your file below (left unchanged)" })
+            }
+            onAutoMatch={() =>
+              toast({ title: "Auto Match is still wired in your file below (left unchanged)" })
+            }
             isApplyingRules={isApplyingRules}
             isAutoMatching={isAutoMatching}
           />
@@ -318,15 +324,19 @@ const Transactions = () => {
                   <TableHead>Date</TableHead>
                   <TableHead>Description</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
+                  <TableHead>Direction</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Source</TableHead>
+                  <TableHead>Linked Receipt</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Receipt</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
+
               <TableBody>
                 {filteredTransactions.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground h-32">
+                    <TableCell colSpan={9} className="text-center text-muted-foreground h-32">
                       No transactions found in this range
                     </TableCell>
                   </TableRow>
@@ -348,7 +358,8 @@ const Transactions = () => {
           </div>
 
           <div className="text-sm text-muted-foreground">
-            Tip: Use <b>This Month</b> first while you import. Once it looks good, switch months and import the next batch.
+            Tip: Use <b>This Month</b> first while you import. Once it looks good, switch months and
+            import the next batch.
           </div>
         </Card>
       </div>
