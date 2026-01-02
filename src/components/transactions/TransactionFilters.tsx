@@ -1,26 +1,27 @@
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import React from "react";
 
-interface TransactionFiltersProps {
+type DateMode = "this_month" | "last_month" | "month" | "range" | "all";
+
+type Props = {
   searchQuery: string;
-  onSearchChange: (value: string) => void;
+  onSearchChange: (v: string) => void;
 
   filterStatus: string;
-  onFilterChange: (value: string) => void;
+  onFilterChange: (v: string) => void;
 
-  dateMode: "this_month" | "last_month" | "month" | "range" | "all";
-  onDateModeChange: (value: TransactionFiltersProps["dateMode"]) => void;
+  dateMode: DateMode;
+  onDateModeChange: (v: DateMode) => void;
 
-  monthValue: string; // YYYY-MM
-  onMonthChange: (value: string) => void;
+  monthValue: string;
+  onMonthChange: (v: string) => void;
 
-  startDate: string; // YYYY-MM-DD
-  endDate: string;   // YYYY-MM-DD
-  onStartDateChange: (value: string) => void;
-  onEndDateChange: (value: string) => void;
-}
+  startDate: string;
+  endDate: string;
+  onStartDateChange: (v: string) => void;
+  onEndDateChange: (v: string) => void;
+};
 
-const TransactionFilters = ({
+const TransactionFilters: React.FC<Props> = ({
   searchQuery,
   onSearchChange,
   filterStatus,
@@ -33,66 +34,67 @@ const TransactionFilters = ({
   endDate,
   onStartDateChange,
   onEndDateChange,
-}: TransactionFiltersProps) => {
+}) => {
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row gap-4">
-        <Input
+    <div className="space-y-3">
+      {/* Search */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <input
+          className="h-10 w-full rounded-md border bg-background px-3 text-sm"
           placeholder="Search description or vendor..."
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
-          className="flex-1"
         />
 
-        <Select value={filterStatus} onValueChange={onFilterChange}>
-          <SelectTrigger className="w-full sm:w-48">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All</SelectItem>
-            <SelectItem value="matched">Matched</SelectItem>
-            <SelectItem value="unmatched">Unmatched</SelectItem>
-            <SelectItem value="recent">Recently Added</SelectItem>
-          </SelectContent>
-        </Select>
+        {/* Status filter */}
+        <select
+          className="h-10 w-full sm:w-48 rounded-md border bg-background px-3 text-sm"
+          value={filterStatus}
+          onChange={(e) => onFilterChange(e.target.value)}
+        >
+          <option value="all">All</option>
+          <option value="matched">Matched</option>
+          <option value="unmatched">Unmatched</option>
+          <option value="recent">Recent (30d)</option>
+        </select>
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-4">
-        <Select value={dateMode} onValueChange={(v) => onDateModeChange(v as any)}>
-          <SelectTrigger className="w-full lg:w-56">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="this_month">This Month</SelectItem>
-            <SelectItem value="last_month">Last Month</SelectItem>
-            <SelectItem value="month">Pick a Month</SelectItem>
-            <SelectItem value="range">Custom Range</SelectItem>
-            <SelectItem value="all">All Dates</SelectItem>
-          </SelectContent>
-        </Select>
+      {/* Date window */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <select
+          className="h-10 w-full sm:w-56 rounded-md border bg-background px-3 text-sm"
+          value={dateMode}
+          onChange={(e) => onDateModeChange(e.target.value as DateMode)}
+        >
+          <option value="this_month">This Month</option>
+          <option value="last_month">Last Month</option>
+          <option value="month">Pick a Month</option>
+          <option value="range">Custom Range</option>
+          <option value="all">All Time</option>
+        </select>
 
         {dateMode === "month" && (
-          <Input
+          <input
+            className="h-10 w-full sm:w-56 rounded-md border bg-background px-3 text-sm"
             type="month"
             value={monthValue}
             onChange={(e) => onMonthChange(e.target.value)}
-            className="w-full lg:w-56"
           />
         )}
 
         {dateMode === "range" && (
-          <div className="flex flex-col sm:flex-row gap-3 w-full">
-            <Input
+          <div className="flex w-full flex-col gap-2 sm:flex-row">
+            <input
+              className="h-10 w-full rounded-md border bg-background px-3 text-sm"
               type="date"
               value={startDate}
               onChange={(e) => onStartDateChange(e.target.value)}
-              className="w-full sm:w-56"
             />
-            <Input
+            <input
+              className="h-10 w-full rounded-md border bg-background px-3 text-sm"
               type="date"
               value={endDate}
               onChange={(e) => onEndDateChange(e.target.value)}
-              className="w-full sm:w-56"
             />
           </div>
         )}
