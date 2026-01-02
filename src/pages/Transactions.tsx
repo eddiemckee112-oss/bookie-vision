@@ -1,5 +1,3 @@
-// src/pages/Transactions.tsx
-
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -10,6 +8,7 @@ import TransactionFilters from "@/components/transactions/TransactionFilters";
 import TransactionSummary from "@/components/transactions/TransactionSummary";
 import TransactionRow from "@/components/transactions/TransactionRow";
 import BankSyncSection from "@/components/transactions/BankSyncSection";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
   Table,
@@ -47,26 +46,26 @@ interface LinkedReceipt {
 type DateMode = "this_month" | "last_month" | "month" | "range" | "all";
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
-
 const firstDayOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
 const lastDayOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
-
-const toYMD = (d: Date) =>
-  `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const toYMD = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 
 const Transactions = () => {
   const { currentOrg, loading: orgLoading } = useOrg();
   const navigate = useNavigate();
+
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
   const [linkedReceipts, setLinkedReceipts] = useState<Record<string, LinkedReceipt>>({});
+
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(null);
+
   const [isApplyingRules, setIsApplyingRules] = useState(false);
   const [isAutoMatching, setIsAutoMatching] = useState(false);
 
-  // ✅ new: date filtering
+  // date window controls
   const [dateMode, setDateMode] = useState<DateMode>("this_month");
   const [monthValue, setMonthValue] = useState(() => {
     const now = new Date();
@@ -83,45 +82,34 @@ const Transactions = () => {
     if (dateMode === "all") return { from: null as string | null, to: null as string | null };
 
     if (dateMode === "this_month") {
-      const from = toYMD(firstDayOfMonth(now));
-      const to = toYMD(lastDayOfMonth(now));
-      return { from, to };
+      return { from: toYMD(firstDayOfMonth(now)), to: toYMD(lastDayOfMonth(now)) };
     }
 
     if (dateMode === "last_month") {
-      const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const from = toYMD(firstDayOfMonth(lastMonth));
-      const to = toYMD(lastDayOfMonth(lastMonth));
-      return { from, to };
+      const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      return { from: toYMD(firstDayOfMonth(lm)), to: toYMD(lastDayOfMonth(lm)) };
     }
 
     if (dateMode === "month") {
-      // monthValue: YYYY-MM
       const [y, m] = monthValue.split("-").map(Number);
       const d = new Date(y, (m || 1) - 1, 1);
-      const from = toYMD(firstDayOfMonth(d));
-      const to = toYMD(lastDayOfMonth(d));
-      return { from, to };
+      return { from: toYMD(firstDayOfMonth(d)), to: toYMD(lastDayOfMonth(d)) };
     }
 
     // range
-    return {
-      from: startDate || null,
-      to: endDate || null,
-    };
+    return { from: startDate || null, to: endDate || null };
   }, [dateMode, monthValue, startDate, endDate]);
 
   useEffect(() => {
     if (orgLoading) return;
+
     if (!currentOrg) {
       navigate("/onboard");
       return;
     }
 
     const linkReceiptId = sessionStorage.getItem("linkReceipt");
-    if (linkReceiptId) {
-      setSelectedReceiptId(linkReceiptId);
-    }
+    if (linkReceiptId) setSelectedReceiptId(linkReceiptId);
 
     fetchTransactions();
     fetchMatches();
@@ -131,10 +119,7 @@ const Transactions = () => {
   const fetchTransactions = async () => {
     if (!currentOrg) return;
 
-    let q = supabase
-      .from("transactions")
-      .select("*")
-      .eq("org_id", currentOrg.id);
+    let q = supabase.from("transactions").select("*").eq("org_id", currentOrg.id);
 
     if (dateWindow.from) q = q.gte("txn_date", dateWindow.from);
     if (dateWindow.to) q = q.lte("txn_date", dateWindow.to);
@@ -150,7 +135,7 @@ const Transactions = () => {
       return;
     }
 
-    setTransactions((data as Transaction[]) || []);
+    setTransactions((data as any) || []);
   };
 
   const fetchMatches = async () => {
@@ -166,9 +151,10 @@ const Transactions = () => {
       return;
     }
 
-    setMatches((matchesData as Match[]) || []);
+    const m = (matchesData as any[]) || [];
+    setMatches(m);
 
-    const receiptIds = matchesData?.map((m) => m.receipt_id) || [];
+    const receiptIds = m.map((x) => x.receipt_id).filter(Boolean);
     if (receiptIds.length > 0) {
       const { data: receiptsData, error: receiptsError } = await supabase
         .from("receipts")
@@ -176,12 +162,12 @@ const Transactions = () => {
         .in("id", receiptIds);
 
       if (!receiptsError && receiptsData) {
-        const receiptsMap: Record<string, LinkedReceipt> = {};
-        (receiptsData as LinkedReceipt[]).forEach((receipt) => {
-          receiptsMap[receipt.id] = receipt;
-        });
-        setLinkedReceipts(receiptsMap);
+        const map: Record<string, LinkedReceipt> = {};
+        (receiptsData as any[]).forEach((r) => (map[r.id] = r));
+        setLinkedReceipts(map);
       }
+    } else {
+      setLinkedReceipts({});
     }
   };
 
@@ -205,10 +191,10 @@ const Transactions = () => {
       if (error) throw error;
 
       toast({ title: "Receipt linked successfully" });
-
       sessionStorage.removeItem("linkReceipt");
       setSelectedReceiptId(null);
-      fetchMatches();
+
+      await fetchMatches();
     } catch (error: any) {
       toast({
         title: "Failed to link receipt",
@@ -231,7 +217,7 @@ const Transactions = () => {
       if (error) throw error;
 
       toast({ title: "Receipt unlinked" });
-      fetchMatches();
+      await fetchMatches();
     } catch (error: any) {
       toast({
         title: "Failed to unlink receipt",
@@ -243,6 +229,65 @@ const Transactions = () => {
 
   const handleUploadReceipt = () => {
     navigate("/receipts");
+  };
+
+  // ✅ Apply Rules (Edge Function)
+  const handleApplyRules = async () => {
+    if (!currentOrg) return;
+    setIsApplyingRules(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke("smart-handler", {
+        body: { orgId: currentOrg.id, action: "apply_rules" },
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Rules applied",
+        description: (data as any)?.message ?? "Done.",
+      });
+
+      await fetchTransactions();
+    } catch (e: any) {
+      toast({
+        title: "Apply Rules failed",
+        description: e?.message ?? String(e),
+        variant: "destructive",
+      });
+    } finally {
+      setIsApplyingRules(false);
+    }
+  };
+
+  // ✅ Auto Match (Edge Function)
+  const handleAutoMatch = async () => {
+    if (!currentOrg) return;
+    setIsAutoMatching(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke("apply-reconciliation", {
+        body: { orgId: currentOrg.id },
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Auto Match complete",
+        description: (data as any)?.message ?? "Done.",
+      });
+
+      await fetchMatches();
+      await fetchTransactions();
+    } catch (e: any) {
+      toast({
+        title: "Auto Match failed",
+        description: e?.message ?? String(e),
+        variant: "destructive",
+      });
+    } finally {
+      setIsAutoMatching(false);
+    }
   };
 
   const filteredTransactions = transactions.filter((t) => {
@@ -307,15 +352,21 @@ const Transactions = () => {
             transactions={filteredTransactions as any}
             matches={matches as any}
             onUploadReceipt={handleUploadReceipt}
-            onApplyRules={() =>
-              toast({ title: "Apply Rules is still wired in your file below (left unchanged)" })
-            }
-            onAutoMatch={() =>
-              toast({ title: "Auto Match is still wired in your file below (left unchanged)" })
-            }
+            onApplyRules={handleApplyRules}
+            onAutoMatch={handleAutoMatch}
             isApplyingRules={isApplyingRules}
             isAutoMatching={isAutoMatching}
           />
+
+          {/* ✅ Buttons back (in case your TransactionSummary layout doesn’t show them) */}
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="outline" onClick={handleAutoMatch} disabled={isAutoMatching}>
+              {isAutoMatching ? "Auto Matching..." : "Auto Match"}
+            </Button>
+            <Button variant="outline" onClick={handleApplyRules} disabled={isApplyingRules}>
+              {isApplyingRules ? "Applying Rules..." : "Apply Rules"}
+            </Button>
+          </div>
 
           <div className="overflow-x-auto">
             <Table>
@@ -358,8 +409,7 @@ const Transactions = () => {
           </div>
 
           <div className="text-sm text-muted-foreground">
-            Tip: Use <b>This Month</b> first while you import. Once it looks good, switch months and
-            import the next batch.
+            Tip: Use <b>This Month</b> first while you import. Once it looks good, switch months and import the next batch.
           </div>
         </Card>
       </div>
