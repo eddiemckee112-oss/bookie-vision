@@ -12,8 +12,9 @@ import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Pencil, Trash2 } from "lucide-react";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CATEGORIES } from "@/constants/categories";
+
+// ✅ single source-of-truth dropdown (org_categories)
+import CategorySelect from "@/components/categories/CategorySelect";
 
 interface VendorRule {
   id: string;
@@ -39,6 +40,7 @@ const Rules = () => {
     source: "",
     direction_filter: "",
   });
+
   const { toast } = useToast();
 
   useEffect(() => {
@@ -48,6 +50,7 @@ const Rules = () => {
       return;
     }
     fetchRules();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentOrg, orgLoading, navigate]);
 
   const fetchRules = async () => {
@@ -67,6 +70,17 @@ const Rules = () => {
     setRules(data || []);
   };
 
+  const resetForm = () => {
+    setFormData({
+      vendor_pattern: "",
+      category: "Uncategorized",
+      tax: "",
+      auto_match: false,
+      source: "",
+      direction_filter: "",
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentOrg) return;
@@ -74,7 +88,7 @@ const Rules = () => {
     const ruleData = {
       org_id: currentOrg.id,
       vendor_pattern: formData.vendor_pattern,
-      category: formData.category || "Uncategorized",
+      category: (formData.category && formData.category.trim()) ? formData.category : "Uncategorized",
       tax: formData.tax ? parseFloat(formData.tax) : null,
       auto_match: formData.auto_match,
       source: formData.source || null,
@@ -136,17 +150,6 @@ const Rules = () => {
     fetchRules();
   };
 
-  const resetForm = () => {
-    setFormData({
-      vendor_pattern: "",
-      category: "Uncategorized",
-      tax: "",
-      auto_match: false,
-      source: "",
-      direction_filter: "",
-    });
-  };
-
   if (orgLoading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
 
   return (
@@ -195,21 +198,14 @@ const Rules = () => {
 
                   <div>
                     <Label>Category</Label>
-                    <Select
+                    <CategorySelect
                       value={formData.category}
-                      onValueChange={(v) => setFormData({ ...formData, category: v })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {CATEGORIES.map((cat) => (
-                          <SelectItem key={cat} value={cat}>
-                            {cat}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      onChange={(next) => setFormData({ ...formData, category: next })}
+                      placeholder="Select category"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      This list comes from Supabase: <b>org_categories</b> (same everywhere).
+                    </p>
                   </div>
 
                   <div>
