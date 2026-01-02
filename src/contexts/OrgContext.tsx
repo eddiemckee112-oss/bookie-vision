@@ -21,8 +21,7 @@ interface OrgContextType {
 const OrgContext = createContext<OrgContextType | undefined>(undefined);
 
 // ✅ Your “real” org going forward:
-const PREFERRED_ORG_ID = "1507521f-8a02-4f0e-af9e-37cf6390f8b9"; // Kosmos Pizza Inc
-
+const PREFERRED_ORG_ID = "d5a0fdcc-efc8-4097-98f2-f01dc6aa10cb"; // Kosmos Pizza Inc
 export const OrgProvider = ({ children }: { children: ReactNode }) => {
   const [currentOrg, setCurrentOrg] = useState<Org | null>(null);
   const [orgRole, setOrgRole] = useState<"owner" | "admin" | "staff" | null>(null);
