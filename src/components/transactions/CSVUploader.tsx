@@ -1,36 +1,81 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Upload, FileText, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface CSVUploaderProps {
   orgId: string;
-  accountId?: string;
+  accountId?: string; // optional default
   onUploadComplete: () => void;
 }
 
-const SOURCE_PRESETS = [
-  { label: "CIBC Bank (Chequing)", institution: "CIBC", source_account_name: "CIBC Bank Account" },
-  { label: "CIBC Visa / Credit Card", institution: "CIBC", source_account_name: "CIBC Credit Card" },
-  { label: "Rogers MasterCard", institution: "Rogers", source_account_name: "Rogers MasterCard" },
-  { label: "PC MasterCard", institution: "PC", source_account_name: "PC MasterCard" },
-  { label: "Other / Custom", institution: "Other", source_account_name: "" },
-] as const;
-
-type SourcePresetLabel = (typeof SOURCE_PRESETS)[number]["label"];
+type AccountRow = {
+  id: string;
+  name: string;
+  type: string | null;
+  currency: string | null;
+};
 
 const CSVUploader = ({ orgId, accountId, onUploadComplete }: CSVUploaderProps) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const [sourcePreset, setSourcePreset] = useState<SourcePresetLabel>(SOURCE_PRESETS[0].label);
-  const [customSourceName, setCustomSourceName] = useState<string>("");
+  const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(false);
+  const [selectedAccountId, setSelectedAccountId] = useState<string>(accountId ?? "");
 
   const { toast } = useToast();
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAccounts = async () => {
+      if (!orgId) return;
+      setAccountsLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from("accounts")
+          .select("id,name,type,currency")
+          .eq("org_id", orgId)
+          .order("created_at", { ascending: false });
+
+        if (error) throw error;
+        if (!cancelled) setAccounts((data as AccountRow[]) ?? []);
+      } catch (e: any) {
+        console.error("Failed to load accounts:", e);
+        toast({
+          title: "Could not load accounts",
+          description: e?.message || "Please refresh and try again.",
+          variant: "destructive",
+        });
+      } finally {
+        if (!cancelled) setAccountsLoading(false);
+      }
+    };
+
+    loadAccounts();
+    return () => {
+      cancelled = true;
+    };
+  }, [orgId, toast]);
+
+  useEffect(() => {
+    // if parent passes a default accountId later, honor it
+    if (accountId && accountId !== selectedAccountId) {
+      setSelectedAccountId(accountId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId]);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -47,31 +92,13 @@ const CSVUploader = ({ orgId, accountId, onUploadComplete }: CSVUploaderProps) =
     maxFiles: 1,
   });
 
-  const resolvedSource = () => {
-    const preset = SOURCE_PRESETS.find((p) => p.label === sourcePreset) || SOURCE_PRESETS[0];
-
-    if (preset.label === "Other / Custom") {
-      return {
-        institution: "Other",
-        source_account_name: customSourceName.trim() || "Bank CSV",
-      };
-    }
-
-    return {
-      institution: preset.institution,
-      source_account_name: preset.source_account_name,
-    };
-  };
-
   const handleProcess = async () => {
     if (!selectedFile) return;
 
-    // Make sure they picked something sensible
-    const { institution, source_account_name } = resolvedSource();
-    if (!source_account_name) {
+    if (!selectedAccountId) {
       toast({
-        title: "Missing source name",
-        description: "Please choose a source (or enter a custom one).",
+        title: "Pick an account first",
+        description: "Select which bank/credit account this CSV belongs to.",
         variant: "destructive",
       });
       return;
@@ -82,27 +109,11 @@ const CSVUploader = ({ orgId, accountId, onUploadComplete }: CSVUploaderProps) =
     try {
       const csvText = await selectedFile.text();
 
-      // Fetch account name if accountId is provided
-      let accountName = undefined;
-      if (accountId) {
-        const { data: accountData } = await supabase
-          .from("accounts")
-          .select("name")
-          .eq("id", accountId)
-          .single();
-        accountName = accountData?.name;
-      }
-
       const { data, error } = await supabase.functions.invoke("process-csv-transactions", {
         body: {
           csvContent: csvText,
           orgId,
-          accountId,
-          accountName,
-
-          // ✅ NEW: explicit labels so it never becomes “CSV Import”
-          institution,
-          sourceAccountName: source_account_name,
+          accountId: selectedAccountId, // ✅ REQUIRED by the Edge Function now
         },
       });
 
@@ -110,7 +121,7 @@ const CSVUploader = ({ orgId, accountId, onUploadComplete }: CSVUploaderProps) =
 
       toast({
         title: "Success",
-        description: `Imported ${data.imported} transactions (rules applied: ${data.categorized || 0})`,
+        description: `Imported ${data?.imported ?? 0} transactions`,
       });
 
       setSelectedFile(null);
@@ -119,7 +130,7 @@ const CSVUploader = ({ orgId, accountId, onUploadComplete }: CSVUploaderProps) =
       console.error("CSV processing error:", error);
       toast({
         title: "Error",
-        description: error.message || "Failed to process CSV file",
+        description: error?.message || "Failed to process CSV file",
         variant: "destructive",
       });
     } finally {
@@ -132,8 +143,6 @@ const CSVUploader = ({ orgId, accountId, onUploadComplete }: CSVUploaderProps) =
   };
 
   if (selectedFile) {
-    const preset = SOURCE_PRESETS.find((p) => p.label === sourcePreset) || SOURCE_PRESETS[0];
-
     return (
       <Card className="p-6">
         <div className="space-y-4">
@@ -152,43 +161,40 @@ const CSVUploader = ({ orgId, accountId, onUploadComplete }: CSVUploaderProps) =
             </Button>
           </div>
 
-          {/* ✅ NEW: Ask what bank/account this CSV belongs to */}
+          {/* ✅ Account picker (real accounts table) */}
           <div className="space-y-2">
-            <p className="text-sm font-medium">Import source</p>
-            <Select value={sourcePreset} onValueChange={(v) => setSourcePreset(v as SourcePresetLabel)}>
-              <SelectTrigger>
-                <SelectValue />
+            <p className="text-sm font-medium">Which account is this CSV from?</p>
+            <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
+              <SelectTrigger disabled={accountsLoading}>
+                <SelectValue placeholder={accountsLoading ? "Loading..." : "Select an account"} />
               </SelectTrigger>
               <SelectContent>
-                {SOURCE_PRESETS.map((p) => (
-                  <SelectItem key={p.label} value={p.label}>
-                    {p.label}
+                {accounts.map((a) => (
+                  <SelectItem key={a.id} value={a.id}>
+                    {a.name}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
 
-            {preset.label === "Other / Custom" && (
-              <input
-                className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
-                placeholder="Enter source name (e.g., TD Chequing)"
-                value={customSourceName}
-                onChange={(e) => setCustomSourceName(e.target.value)}
-              />
+            {(!accountsLoading && accounts.length === 0) && (
+              <div className="text-xs text-muted-foreground">
+                No accounts found for this org. Add accounts first.
+              </div>
             )}
           </div>
 
           <div className="flex gap-3">
-            <Button onClick={handleProcess} disabled={isProcessing} className="flex-1">
+            <Button
+              onClick={handleProcess}
+              disabled={isProcessing || !selectedAccountId || accountsLoading}
+              className="flex-1"
+            >
               {isProcessing ? "Processing..." : "Import Transactions"}
             </Button>
             <Button variant="outline" onClick={handleClear} disabled={isProcessing}>
               Cancel
             </Button>
-          </div>
-
-          <div className="text-xs text-muted-foreground">
-            Tip: This label will be saved into <b>source_account_name</b> and <b>institution</b> so reports export cleanly.
           </div>
         </div>
       </Card>
