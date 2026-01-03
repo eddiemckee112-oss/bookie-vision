@@ -12,9 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Pencil, Trash2 } from "lucide-react";
-
-// ✅ single source-of-truth dropdown (org_categories)
-import CategorySelect from "@/components/categories/CategorySelect";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface VendorRule {
   id: string;
@@ -26,10 +24,21 @@ interface VendorRule {
   direction_filter: string | null;
 }
 
+type CategoryRow = {
+  id: string;
+  name: string;
+  sort: number | null;
+};
+
 const Rules = () => {
   const { currentOrg, loading: orgLoading } = useOrg();
   const navigate = useNavigate();
+  const { toast } = useToast();
+
   const [rules, setRules] = useState<VendorRule[]>([]);
+  const [categories, setCategories] = useState<CategoryRow[]>([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(false);
+
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<VendorRule | null>(null);
   const [formData, setFormData] = useState({
@@ -41,8 +50,6 @@ const Rules = () => {
     direction_filter: "",
   });
 
-  const { toast } = useToast();
-
   useEffect(() => {
     if (orgLoading) return;
     if (!currentOrg) {
@@ -50,8 +57,36 @@ const Rules = () => {
       return;
     }
     fetchRules();
+    loadCategories();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentOrg, orgLoading, navigate]);
+
+  const loadCategories = async () => {
+    if (!currentOrg) return;
+    setCategoriesLoading(true);
+
+    try {
+      const { data, error } = await supabase
+        .from("categories")
+        .select("id,name,sort")
+        .eq("org_id", currentOrg.id)
+        .order("sort", { ascending: true })
+        .order("name", { ascending: true });
+
+      if (error) throw error;
+      setCategories((data as CategoryRow[]) || []);
+    } catch (e: any) {
+      console.error("Failed to load categories:", e);
+      toast({
+        title: "Could not load categories",
+        description: e?.message || "Please refresh and try again.",
+        variant: "destructive",
+      });
+      setCategories([]);
+    } finally {
+      setCategoriesLoading(false);
+    }
+  };
 
   const fetchRules = async () => {
     if (!currentOrg) return;
@@ -70,17 +105,6 @@ const Rules = () => {
     setRules(data || []);
   };
 
-  const resetForm = () => {
-    setFormData({
-      vendor_pattern: "",
-      category: "Uncategorized",
-      tax: "",
-      auto_match: false,
-      source: "",
-      direction_filter: "",
-    });
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentOrg) return;
@@ -88,7 +112,7 @@ const Rules = () => {
     const ruleData = {
       org_id: currentOrg.id,
       vendor_pattern: formData.vendor_pattern,
-      category: (formData.category && formData.category.trim()) ? formData.category : "Uncategorized",
+      category: (formData.category || "Uncategorized").trim(),
       tax: formData.tax ? parseFloat(formData.tax) : null,
       auto_match: formData.auto_match,
       source: formData.source || null,
@@ -150,6 +174,17 @@ const Rules = () => {
     fetchRules();
   };
 
+  const resetForm = () => {
+    setFormData({
+      vendor_pattern: "",
+      category: "Uncategorized",
+      tax: "",
+      auto_match: false,
+      source: "",
+      direction_filter: "",
+    });
+  };
+
   if (orgLoading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
 
   return (
@@ -191,21 +226,34 @@ const Rules = () => {
                       id="vendor_pattern"
                       value={formData.vendor_pattern}
                       onChange={(e) => setFormData({ ...formData, vendor_pattern: e.target.value })}
-                      placeholder="e.g., WALMART, AMAZON"
+                      placeholder="e.g., SYSCO, SQUARE, WALMART"
                       required
                     />
                   </div>
 
                   <div>
                     <Label>Category</Label>
-                    <CategorySelect
-                      value={formData.category}
-                      onChange={(next) => setFormData({ ...formData, category: next })}
-                      placeholder="Select category"
-                    />
-                    <p className="text-xs text-muted-foreground mt-1">
-                      This list comes from Supabase: <b>org_categories</b> (same everywhere).
-                    </p>
+                    <Select value={formData.category} onValueChange={(v) => setFormData({ ...formData, category: v })}>
+                      <SelectTrigger>
+                        <SelectValue placeholder={categoriesLoading ? "Loading..." : "Select category"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {/* Never allow empty SelectItem values */}
+                        {(categories.length ? categories : [{ id: "uncat", name: "Uncategorized", sort: 0 }]).map(
+                          (c) => (
+                            <SelectItem key={c.id} value={c.name}>
+                              {c.name}
+                            </SelectItem>
+                          ),
+                        )}
+                      </SelectContent>
+                    </Select>
+
+                    {!categoriesLoading && categories.length === 0 && (
+                      <div className="text-xs text-muted-foreground mt-1">
+                        No categories found for this org. (categories table is empty)
+                      </div>
+                    )}
                   </div>
 
                   <div>
@@ -236,7 +284,7 @@ const Rules = () => {
                       id="direction_filter"
                       value={formData.direction_filter}
                       onChange={(e) => setFormData({ ...formData, direction_filter: e.target.value })}
-                      placeholder="e.g., debit, credit"
+                      placeholder="debit or credit (optional)"
                     />
                   </div>
 
@@ -306,7 +354,7 @@ const Rules = () => {
                           <Pencil className="h-4 w-4" />
                         </Button>
                         <Button variant="ghost" size="icon" onClick={() => handleDelete(rule.id)}>
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="h-4 w-4 text-destructive" />
                         </Button>
                       </div>
                     </TableCell>
