@@ -30,27 +30,104 @@ const App = () => (
         <OrgProvider>
           <Toaster />
           <Sonner />
-          <BrowserRouter>
-          <Routes>
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/auth" element={<Auth />} />
-            <Route path="/reset-password" element={<ResetPassword />} />
-            <Route path="/onboard" element={<ProtectedRoute><Onboard /></ProtectedRoute>} />
-            <Route path="/choose-org" element={<ProtectedRoute><ChooseOrg /></ProtectedRoute>} />
-            <Route path="/accept-invite" element={<ProtectedRoute><AcceptInvite /></ProtectedRoute>} />
-            <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-            <Route path="/receipts" element={<ProtectedRoute><Receipts /></ProtectedRoute>} />
-            <Route path="/transactions" element={<ProtectedRoute><Transactions /></ProtectedRoute>} />
-            <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
-            <Route path="/rules" element={<ProtectedRoute><Rules /></ProtectedRoute>} />
-            <Route path="/square" element={<ProtectedRoute><Square /></ProtectedRoute>} />
-            <Route path="/team" element={<ProtectedRoute><Team /></ProtectedRoute>} />
-            <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </BrowserRouter>
-      </OrgProvider>
-    </TooltipProvider>
+          <BrowserRouter basename={import.meta.env.BASE_URL}>
+            <Routes>
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/auth" element={<Auth />} />
+              <Route path="/reset-password" element={<ResetPassword />} />
+              <Route
+                path="/onboard"
+                element={
+                  <ProtectedRoute>
+                    <Onboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/choose-org"
+                element={
+                  <ProtectedRoute>
+                    <ChooseOrg />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/accept-invite"
+                element={
+                  <ProtectedRoute>
+                    <AcceptInvite />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/dashboard"
+                element={
+                  <ProtectedRoute>
+                    <Dashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/receipts"
+                element={
+                  <ProtectedRoute>
+                    <Receipts />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/transactions"
+                element={
+                  <ProtectedRoute>
+                    <Transactions />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/reports"
+                element={
+                  <ProtectedRoute>
+                    <Reports />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/rules"
+                element={
+                  <ProtectedRoute>
+                    <Rules />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/square"
+                element={
+                  <ProtectedRoute>
+                    <Square />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/team"
+                element={
+                  <ProtectedRoute>
+                    <Team />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/settings"
+                element={
+                  <ProtectedRoute>
+                    <Settings />
+                  </ProtectedRoute>
+                }
+              />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </BrowserRouter>
+        </OrgProvider>
+      </TooltipProvider>
     </ThemeProvider>
   </QueryClientProvider>
 );
