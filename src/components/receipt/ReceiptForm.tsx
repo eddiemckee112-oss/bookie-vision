@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useDropzone } from "react-dropzone";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,29 +13,7 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useOrg } from "@/contexts/OrgContext";
-
-const CATEGORIES = [
-  "Uncategorized",
-  "Income",
-  "Bank Fees",
-  "Fuel",
-  "Utilities",
-  "Phone/Internet",
-  "Insurance",
-  "Professional Fees",
-  "Software",
-  "Subscriptions",
-  "Repairs & Maintenance",
-  "Office",
-  "Meals & Entertainment",
-  "Travel",
-  "Lodging",
-  "Building Maintenance",
-  "Building Miscellaneous",
-  "Restaurant (Food & Supplies)",
-  "Taxes",
-  "Other",
-];
+import { useOrgCategories } from "@/hooks/useOrgCategories";
 
 const SOURCES = ["CIBC Bank Account", "Rogers MasterCard", "PC MasterCard", "Cash"];
 
@@ -56,10 +34,19 @@ interface ReceiptFormProps {
 const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
   const { currentOrg } = useOrg();
   const { toast } = useToast();
+  const { categories: orgCategories, loading: categoriesLoading } = useOrgCategories();
+
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+
+  const categoryOptions = useMemo(() => {
+    // Always include Uncategorized even if missing from DB
+    const names = (orgCategories ?? []).map((c) => c.name).filter(Boolean);
+    if (!names.includes("Uncategorized")) names.unshift("Uncategorized");
+    return names;
+  }, [orgCategories]);
 
   const [formData, setFormData] = useState<ReceiptFormData>({
     vendor: "",
@@ -78,9 +65,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
 
       if (file.type.startsWith("image/")) {
         const reader = new FileReader();
-        reader.onloadend = () => {
-          setPreview(reader.result as string);
-        };
+        reader.onloadend = () => setPreview(reader.result as string);
         reader.readAsDataURL(file);
       } else {
         setPreview(null);
@@ -111,6 +96,28 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
     });
   };
 
+  const normalizeCategoryFromAI = (aiCategory: unknown) => {
+    const c = typeof aiCategory === "string" ? aiCategory.trim() : "";
+    if (!c) return "";
+
+    // If AI returns an old label that no longer exists, keep Uncategorized
+    // (You can add mappings here if you want)
+    if (categoryOptions.includes(c)) return c;
+
+    // common old -> new mappings (optional safety)
+    const map: Record<string, string> = {
+      "Food & Supplies": "Restaurant Food & Supplies",
+      "Restaurant Supplies": "Restaurant Food & Supplies",
+      "Food & Beverage": "Restaurant Food & Supplies",
+      "Restaurant (Food & Supplies)": "Restaurant Food & Supplies",
+    };
+
+    const mapped = map[c];
+    if (mapped && categoryOptions.includes(mapped)) return mapped;
+
+    return "";
+  };
+
   const handleScanWithAI = async () => {
     if (!selectedFile || !currentOrg) return;
 
@@ -137,6 +144,8 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
 
           const receipt = (data as any)?.receiptData ?? (data as any) ?? {};
 
+          const aiCategory = normalizeCategoryFromAI(receipt.category);
+
           setFormData((prev) => ({
             ...prev,
             vendor: prev.vendor || receipt.vendor || "",
@@ -144,7 +153,9 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
             total: prev.total || (receipt.total != null ? String(receipt.total) : prev.total),
             tax: prev.tax || (receipt.tax != null ? String(receipt.tax) : prev.tax),
             category:
-              prev.category && prev.category !== "Uncategorized" ? prev.category : receipt.category || prev.category,
+              prev.category && prev.category !== "Uncategorized"
+                ? prev.category
+                : aiCategory || prev.category || "Uncategorized",
             source: prev.source || receipt.source || prev.source,
             notes: prev.notes || receipt.notes || prev.notes,
           }));
@@ -166,10 +177,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
       };
 
       reader.onerror = () => {
-        toast({
-          title: "Failed to read file",
-          variant: "destructive",
-        });
+        toast({ title: "Failed to read file", variant: "destructive" });
         setIsScanning(false);
       };
     } catch (error: any) {
@@ -208,7 +216,6 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
         const fileExt = selectedFile.name.split(".").pop();
         const filePath = `${currentOrg.id}/${timestamp}.${fileExt}`;
 
-        // 🔁 Use receipts-warm bucket
         const { error: uploadError } = await supabase.storage.from("receipts-warm").upload(filePath, selectedFile);
 
         if (!uploadError) {
@@ -216,13 +223,16 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
         }
       }
 
+      // if the selected category doesn't exist (stale UI), force Uncategorized
+      const safeCategory = categoryOptions.includes(formData.category) ? formData.category : "Uncategorized";
+
       const { error } = await supabase.from("receipts").insert({
         org_id: currentOrg.id,
         vendor: formData.vendor.trim(),
         receipt_date: format(formData.receipt_date, "yyyy-MM-dd"),
         total: parseFloat(formData.total),
         tax: formData.tax ? parseFloat(formData.tax) : 0,
-        category: formData.category,
+        category: safeCategory,
         source: formData.source,
         notes: formData.notes.trim() || null,
         image_url: imageUrl,
@@ -364,12 +374,13 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
           <Select
             value={formData.category}
             onValueChange={(value) => setFormData((prev) => ({ ...prev, category: value }))}
+            disabled={categoriesLoading || categoryOptions.length === 0}
           >
             <SelectTrigger>
-              <SelectValue />
+              <SelectValue placeholder={categoriesLoading ? "Loading categories..." : "Select category"} />
             </SelectTrigger>
             <SelectContent>
-              {CATEGORIES.map((cat) => (
+              {categoryOptions.map((cat) => (
                 <SelectItem key={cat} value={cat}>
                   {cat}
                 </SelectItem>
