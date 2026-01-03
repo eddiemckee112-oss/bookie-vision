@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,13 +11,7 @@ import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-
-const CATEGORIES = [
-  "Uncategorized", "Income", "Bank Fees", "Fuel", "Utilities", "Phone/Internet",
-  "Insurance", "Professional Fees", "Software", "Subscriptions", "Repairs & Maintenance",
-  "Office", "Meals & Entertainment", "Travel", "Lodging", "Building Maintenance",
-  "Building Miscellaneous", "Restaurant (Food & Supplies)", "Taxes", "Other",
-];
+import { useOrgCategories } from "@/hooks/useOrgCategories";
 
 const SOURCES = ["CIBC Bank Account", "Rogers MasterCard", "PC MasterCard", "Cash"];
 
@@ -41,6 +35,13 @@ interface ReceiptEditDialogProps {
 
 const ReceiptEditDialog = ({ receipt, open, onOpenChange, onSuccess }: ReceiptEditDialogProps) => {
   const { toast } = useToast();
+  const { categories: orgCategories, loading: categoriesLoading } = useOrgCategories();
+
+  const categoryOptions = useMemo(() => {
+    const names = (orgCategories ?? []).map((c) => c.name).filter(Boolean);
+    if (!names.includes("Uncategorized")) names.unshift("Uncategorized");
+    return names;
+  }, [orgCategories]);
 
   const [vendor, setVendor] = useState("");
   const [date, setDate] = useState<Date | undefined>(undefined);
@@ -51,7 +52,7 @@ const ReceiptEditDialog = ({ receipt, open, onOpenChange, onSuccess }: ReceiptEd
   const [notes, setNotes] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
-  // ✅ THIS is the fix: when a new receipt is chosen for editing, populate the form.
+  // When the dialog opens or receipt changes, populate the form
   useEffect(() => {
     if (!open) return;
 
@@ -70,13 +71,29 @@ const ReceiptEditDialog = ({ receipt, open, onOpenChange, onSuccess }: ReceiptEd
     setDate(receipt.receipt_date ? new Date(receipt.receipt_date) : undefined);
     setTotal(receipt.total !== null && receipt.total !== undefined ? String(receipt.total) : "");
     setTax(receipt.tax !== null && receipt.tax !== undefined ? String(receipt.tax) : "");
-    setCategory(receipt.category || "Uncategorized");
+
+    // If receipt has an old category that no longer exists, fall back safely
+    const incoming = receipt.category || "Uncategorized";
+    setCategory(categoryOptions.includes(incoming) ? incoming : "Uncategorized");
+
     setSource(receipt.source || SOURCES[0]);
     setNotes(receipt.notes || "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [receipt, open]);
+
+  // If categories load after dialog opens, re-validate the selected category
+  useEffect(() => {
+    if (!open) return;
+    if (!categoryOptions.length) return;
+
+    setCategory((prev) => (categoryOptions.includes(prev) ? prev : "Uncategorized"));
+  }, [categoryOptions, open]);
 
   const handleSave = async () => {
     if (!receipt || !date) return;
+
+    // Safety: don’t save a category that isn’t valid anymore
+    const safeCategory = categoryOptions.includes(category) ? category : "Uncategorized";
 
     setIsSaving(true);
     try {
@@ -87,7 +104,7 @@ const ReceiptEditDialog = ({ receipt, open, onOpenChange, onSuccess }: ReceiptEd
           receipt_date: format(date, "yyyy-MM-dd"),
           total: parseFloat(total),
           tax: parseFloat(tax) || 0,
-          category,
+          category: safeCategory,
           source,
           notes: notes.trim() || null,
         })
@@ -176,11 +193,19 @@ const ReceiptEditDialog = ({ receipt, open, onOpenChange, onSuccess }: ReceiptEd
 
           <div className="space-y-2">
             <Label>Category</Label>
-            <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+            <Select
+              value={category}
+              onValueChange={setCategory}
+              disabled={categoriesLoading || categoryOptions.length === 0}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder={categoriesLoading ? "Loading categories..." : "Select category"} />
+              </SelectTrigger>
               <SelectContent>
-                {CATEGORIES.map((cat) => (
-                  <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                {categoryOptions.map((cat) => (
+                  <SelectItem key={cat} value={cat}>
+                    {cat}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -189,10 +214,14 @@ const ReceiptEditDialog = ({ receipt, open, onOpenChange, onSuccess }: ReceiptEd
           <div className="space-y-2">
             <Label>Source</Label>
             <Select value={source} onValueChange={setSource}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 {SOURCES.map((src) => (
-                  <SelectItem key={src} value={src}>{src}</SelectItem>
+                  <SelectItem key={src} value={src}>
+                    {src}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -200,16 +229,13 @@ const ReceiptEditDialog = ({ receipt, open, onOpenChange, onSuccess }: ReceiptEd
 
           <div className="space-y-2">
             <Label htmlFor="edit-notes">Notes</Label>
-            <Textarea
-              id="edit-notes"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={3}
-            />
+            <Textarea id="edit-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
           </div>
 
           <div className="flex gap-2 justify-end">
-            <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
             <Button onClick={handleSave} disabled={isSaving || !receipt || !date}>
               {isSaving ? "Saving..." : "Save Changes"}
             </Button>
