@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ReceiptData } from "@/types/receipt";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { X } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useOrgCategories } from "@/hooks/useOrgCategories";
 
 interface ReceiptReviewProps {
   data: ReceiptData & { imageUrl?: string };
@@ -15,9 +17,23 @@ interface ReceiptReviewProps {
 const ReceiptReview = ({ data, onConfirm, onCancel }: ReceiptReviewProps) => {
   const [editedData, setEditedData] = useState(data);
 
+  const { categories: orgCategories, loading: categoriesLoading } = useOrgCategories();
+
+  const categoryOptions = useMemo(() => {
+    const names = (orgCategories ?? []).map((c) => c.name).filter(Boolean);
+    if (!names.includes("Uncategorized")) names.unshift("Uncategorized");
+    return names;
+  }, [orgCategories]);
+
   const handleChange = (field: keyof ReceiptData, value: any) => {
     setEditedData((prev) => ({ ...prev, [field]: value }));
   };
+
+  // Keep category valid if AI gave something weird
+  const currentCategory = useMemo(() => {
+    const incoming = (editedData.category || "Uncategorized").trim();
+    return categoryOptions.includes(incoming) ? incoming : "Uncategorized";
+  }, [editedData.category, categoryOptions]);
 
   return (
     <Card className="p-6">
@@ -74,12 +90,23 @@ const ReceiptReview = ({ data, onConfirm, onCancel }: ReceiptReviewProps) => {
         </div>
 
         <div>
-          <Label htmlFor="category">Category</Label>
-          <Input
-            id="category"
-            value={editedData.category || ""}
-            onChange={(e) => handleChange("category", e.target.value)}
-          />
+          <Label>Category</Label>
+          <Select
+            value={currentCategory}
+            onValueChange={(v) => handleChange("category", v)}
+            disabled={categoriesLoading || categoryOptions.length === 0}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder={categoriesLoading ? "Loading categories..." : "Select category"} />
+            </SelectTrigger>
+            <SelectContent>
+              {categoryOptions.map((cat) => (
+                <SelectItem key={cat} value={cat}>
+                  {cat}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <div>
@@ -96,7 +123,14 @@ const ReceiptReview = ({ data, onConfirm, onCancel }: ReceiptReviewProps) => {
         <Button variant="outline" onClick={onCancel}>
           Cancel
         </Button>
-        <Button onClick={() => onConfirm(editedData)}>
+        <Button
+          onClick={() =>
+            onConfirm({
+              ...editedData,
+              category: currentCategory,
+            })
+          }
+        >
           Save Receipt
         </Button>
       </div>
