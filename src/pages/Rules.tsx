@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useOrg } from "@/contexts/OrgContext";
@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useOrgCategories } from "@/hooks/useOrgCategories";
 
 interface VendorRule {
   id: string;
@@ -22,24 +23,38 @@ interface VendorRule {
   auto_match: boolean;
   source: string | null;
   direction_filter: string | null;
+  created_at?: string;
 }
-
-type OrgCategory = {
-  id: string;
-  name: string;
-  sort: number | null;
-};
 
 const Rules = () => {
   const { currentOrg, loading: orgLoading } = useOrg();
   const navigate = useNavigate();
+  const { toast } = useToast();
 
   const [rules, setRules] = useState<VendorRule[]>([]);
-  const [categories, setCategories] = useState<OrgCategory[]>([]);
-  const [categoriesLoading, setCategoriesLoading] = useState(false);
-
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<VendorRule | null>(null);
+
+  // ✅ Categories now come from DB (org_categories)
+  const { categories: orgCategories, loading: catsLoading, refresh: refreshCats } = useOrgCategories();
+
+  const categoryNames = useMemo(() => {
+    // guard: Radix Select dies if value is "" — so we only keep non-empty strings
+    const names = orgCategories.map((c) => (c.name ?? "").trim()).filter(Boolean);
+
+    // ensure "Uncategorized" exists and appears first
+    const hasUncat = names.some((n) => n.toLowerCase() === "uncategorized");
+    const merged = hasUncat ? names : ["Uncategorized", ...names];
+
+    // de-dupe case-insensitive
+    const seen = new Set<string>();
+    return merged.filter((n) => {
+      const key = n.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [orgCategories]);
 
   const [formData, setFormData] = useState({
     vendor_pattern: "",
@@ -50,8 +65,6 @@ const Rules = () => {
     direction_filter: "",
   });
 
-  const { toast } = useToast();
-
   useEffect(() => {
     if (orgLoading) return;
     if (!currentOrg) {
@@ -59,34 +72,10 @@ const Rules = () => {
       return;
     }
     fetchRules();
-    fetchCategories();
+    // also refresh categories on load so dropdown is always current
+    refreshCats();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentOrg, orgLoading, navigate]);
-
-  const fetchCategories = async () => {
-    if (!currentOrg) return;
-    setCategoriesLoading(true);
-
-    const { data, error } = await supabase
-      .from("org_categories")
-      .select("id,name,sort")
-      .eq("org_id", currentOrg.id)
-      .order("sort", { ascending: true })
-      .order("name", { ascending: true });
-
-    setCategoriesLoading(false);
-
-    if (error) {
-      toast({
-        title: "Error fetching categories",
-        description: error.message,
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setCategories((data as OrgCategory[]) || []);
-  };
+  }, [currentOrg?.id, orgLoading]);
 
   const fetchRules = async () => {
     if (!currentOrg) return;
@@ -98,11 +87,7 @@ const Rules = () => {
       .order("created_at", { ascending: false });
 
     if (error) {
-      toast({
-        title: "Error fetching rules",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "Error fetching rules", description: error.message, variant: "destructive" });
       return;
     }
 
@@ -124,16 +109,16 @@ const Rules = () => {
     e.preventDefault();
     if (!currentOrg) return;
 
-    const categoryValue = (formData.category || "").trim() || "Uncategorized";
+    const safeCategory = (formData.category ?? "").trim() || "Uncategorized";
 
     const ruleData = {
       org_id: currentOrg.id,
-      vendor_pattern: formData.vendor_pattern,
-      category: categoryValue,
+      vendor_pattern: formData.vendor_pattern.trim(),
+      category: safeCategory,
       tax: formData.tax ? parseFloat(formData.tax) : null,
       auto_match: formData.auto_match,
-      source: formData.source || null,
-      direction_filter: formData.direction_filter || null,
+      source: formData.source.trim() || null,
+      direction_filter: formData.direction_filter.trim() || null,
     };
 
     try {
@@ -152,11 +137,7 @@ const Rules = () => {
       resetForm();
       fetchRules();
     } catch (error: any) {
-      toast({
-        title: "Error saving rule",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "Error saving rule", description: error.message, variant: "destructive" });
     }
   };
 
@@ -164,7 +145,7 @@ const Rules = () => {
     setEditingRule(rule);
     setFormData({
       vendor_pattern: rule.vendor_pattern,
-      category: rule.category || "Uncategorized",
+      category: (rule.category ?? "Uncategorized").trim() || "Uncategorized",
       tax: rule.tax?.toString() || "",
       auto_match: rule.auto_match,
       source: rule.source || "",
@@ -178,11 +159,7 @@ const Rules = () => {
 
     const { error } = await supabase.from("vendor_rules").delete().eq("id", id);
     if (error) {
-      toast({
-        title: "Error deleting rule",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "Error deleting rule", description: error.message, variant: "destructive" });
       return;
     }
 
@@ -197,22 +174,13 @@ const Rules = () => {
       .eq("id", rule.id);
 
     if (error) {
-      toast({
-        title: "Error updating rule",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "Error updating rule", description: error.message, variant: "destructive" });
       return;
     }
-
     fetchRules();
   };
 
-  if (orgLoading) {
-    return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
-  }
-
-  const categoryOptions = categories.length ? categories.map((c) => c.name) : ["Uncategorized"];
+  if (orgLoading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
 
   return (
     <Layout>
@@ -253,21 +221,25 @@ const Rules = () => {
                       id="vendor_pattern"
                       value={formData.vendor_pattern}
                       onChange={(e) => setFormData({ ...formData, vendor_pattern: e.target.value })}
-                      placeholder="e.g., SYSCO, SQUARE, WALMART"
+                      placeholder="e.g., WALMART, AMAZON"
                       required
                     />
                   </div>
 
                   <div>
                     <Label>Category</Label>
-                    <Select value={formData.category} onValueChange={(v) => setFormData({ ...formData, category: v })}>
-                      <SelectTrigger disabled={categoriesLoading}>
-                        <SelectValue placeholder={categoriesLoading ? "Loading..." : "Select category"} />
+                    <Select
+                      value={formData.category}
+                      onValueChange={(v) => setFormData({ ...formData, category: v })}
+                      disabled={catsLoading}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder={catsLoading ? "Loading categories..." : "Select a category"} />
                       </SelectTrigger>
                       <SelectContent>
-                        {categoryOptions.map((cat) => (
-                          <SelectItem key={cat} value={cat}>
-                            {cat}
+                        {categoryNames.map((name) => (
+                          <SelectItem key={name} value={name}>
+                            {name}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -292,7 +264,7 @@ const Rules = () => {
                       id="source"
                       value={formData.source}
                       onChange={(e) => setFormData({ ...formData, source: e.target.value })}
-                      placeholder="e.g., CIBC Chequing"
+                      placeholder="e.g., CIBC Bank Account"
                     />
                   </div>
 
@@ -302,7 +274,7 @@ const Rules = () => {
                       id="direction_filter"
                       value={formData.direction_filter}
                       onChange={(e) => setFormData({ ...formData, direction_filter: e.target.value })}
-                      placeholder="debit or credit (optional)"
+                      placeholder="e.g., debit, credit"
                     />
                   </div>
 
@@ -368,10 +340,10 @@ const Rules = () => {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <Button variant="ghost" size="icon" onClick={() => handleEdit(rule)}>
+                        <Button variant="ghost" size="icon" onClick={() => handleEdit(rule)} title="Edit">
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => handleDelete(rule.id)}>
+                        <Button variant="ghost" size="icon" onClick={() => handleDelete(rule.id)} title="Delete">
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
