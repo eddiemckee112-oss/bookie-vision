@@ -67,7 +67,7 @@ const Rules = () => {
 
     try {
       const { data, error } = await supabase
-        .from("categories")
+        .from("org_categories")
         .select("id,name,sort")
         .eq("org_id", currentOrg.id)
         .order("sort", { ascending: true })
@@ -238,7 +238,6 @@ const Rules = () => {
                         <SelectValue placeholder={categoriesLoading ? "Loading..." : "Select category"} />
                       </SelectTrigger>
                       <SelectContent>
-                        {/* Never allow empty SelectItem values */}
                         {(categories.length ? categories : [{ id: "uncat", name: "Uncategorized", sort: 0 }]).map(
                           (c) => (
                             <SelectItem key={c.id} value={c.name}>
@@ -248,12 +247,6 @@ const Rules = () => {
                         )}
                       </SelectContent>
                     </Select>
-
-                    {!categoriesLoading && categories.length === 0 && (
-                      <div className="text-xs text-muted-foreground mt-1">
-                        No categories found for this org. (categories table is empty)
-                      </div>
-                    )}
                   </div>
 
                   <div>
