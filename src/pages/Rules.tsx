@@ -24,7 +24,7 @@ interface VendorRule {
   direction_filter: string | null;
 }
 
-type CategoryRow = {
+type OrgCategory = {
   id: string;
   name: string;
   sort: number | null;
@@ -33,14 +33,14 @@ type CategoryRow = {
 const Rules = () => {
   const { currentOrg, loading: orgLoading } = useOrg();
   const navigate = useNavigate();
-  const { toast } = useToast();
 
   const [rules, setRules] = useState<VendorRule[]>([]);
-  const [categories, setCategories] = useState<CategoryRow[]>([]);
+  const [categories, setCategories] = useState<OrgCategory[]>([]);
   const [categoriesLoading, setCategoriesLoading] = useState(false);
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<VendorRule | null>(null);
+
   const [formData, setFormData] = useState({
     vendor_pattern: "",
     category: "Uncategorized",
@@ -50,6 +50,8 @@ const Rules = () => {
     direction_filter: "",
   });
 
+  const { toast } = useToast();
+
   useEffect(() => {
     if (orgLoading) return;
     if (!currentOrg) {
@@ -57,35 +59,33 @@ const Rules = () => {
       return;
     }
     fetchRules();
-    loadCategories();
+    fetchCategories();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentOrg, orgLoading, navigate]);
 
-  const loadCategories = async () => {
+  const fetchCategories = async () => {
     if (!currentOrg) return;
     setCategoriesLoading(true);
 
-    try {
-      const { data, error } = await supabase
-        .from("org_categories")
-        .select("id,name,sort")
-        .eq("org_id", currentOrg.id)
-        .order("sort", { ascending: true })
-        .order("name", { ascending: true });
+    const { data, error } = await supabase
+      .from("org_categories")
+      .select("id,name,sort")
+      .eq("org_id", currentOrg.id)
+      .order("sort", { ascending: true })
+      .order("name", { ascending: true });
 
-      if (error) throw error;
-      setCategories((data as CategoryRow[]) || []);
-    } catch (e: any) {
-      console.error("Failed to load categories:", e);
+    setCategoriesLoading(false);
+
+    if (error) {
       toast({
-        title: "Could not load categories",
-        description: e?.message || "Please refresh and try again.",
+        title: "Error fetching categories",
+        description: error.message,
         variant: "destructive",
       });
-      setCategories([]);
-    } finally {
-      setCategoriesLoading(false);
+      return;
     }
+
+    setCategories((data as OrgCategory[]) || []);
   };
 
   const fetchRules = async () => {
@@ -98,21 +98,38 @@ const Rules = () => {
       .order("created_at", { ascending: false });
 
     if (error) {
-      toast({ title: "Error fetching rules", description: error.message, variant: "destructive" });
+      toast({
+        title: "Error fetching rules",
+        description: error.message,
+        variant: "destructive",
+      });
       return;
     }
 
-    setRules(data || []);
+    setRules((data as VendorRule[]) || []);
+  };
+
+  const resetForm = () => {
+    setFormData({
+      vendor_pattern: "",
+      category: "Uncategorized",
+      tax: "",
+      auto_match: false,
+      source: "",
+      direction_filter: "",
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentOrg) return;
 
+    const categoryValue = (formData.category || "").trim() || "Uncategorized";
+
     const ruleData = {
       org_id: currentOrg.id,
       vendor_pattern: formData.vendor_pattern,
-      category: (formData.category || "Uncategorized").trim(),
+      category: categoryValue,
       tax: formData.tax ? parseFloat(formData.tax) : null,
       auto_match: formData.auto_match,
       source: formData.source || null,
@@ -135,7 +152,11 @@ const Rules = () => {
       resetForm();
       fetchRules();
     } catch (error: any) {
-      toast({ title: "Error saving rule", description: error.message, variant: "destructive" });
+      toast({
+        title: "Error saving rule",
+        description: error.message,
+        variant: "destructive",
+      });
     }
   };
 
@@ -157,7 +178,11 @@ const Rules = () => {
 
     const { error } = await supabase.from("vendor_rules").delete().eq("id", id);
     if (error) {
-      toast({ title: "Error deleting rule", description: error.message, variant: "destructive" });
+      toast({
+        title: "Error deleting rule",
+        description: error.message,
+        variant: "destructive",
+      });
       return;
     }
 
@@ -166,26 +191,28 @@ const Rules = () => {
   };
 
   const handleToggleAutoMatch = async (rule: VendorRule) => {
-    const { error } = await supabase.from("vendor_rules").update({ auto_match: !rule.auto_match }).eq("id", rule.id);
+    const { error } = await supabase
+      .from("vendor_rules")
+      .update({ auto_match: !rule.auto_match })
+      .eq("id", rule.id);
+
     if (error) {
-      toast({ title: "Error updating rule", description: error.message, variant: "destructive" });
+      toast({
+        title: "Error updating rule",
+        description: error.message,
+        variant: "destructive",
+      });
       return;
     }
+
     fetchRules();
   };
 
-  const resetForm = () => {
-    setFormData({
-      vendor_pattern: "",
-      category: "Uncategorized",
-      tax: "",
-      auto_match: false,
-      source: "",
-      direction_filter: "",
-    });
-  };
+  if (orgLoading) {
+    return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+  }
 
-  if (orgLoading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+  const categoryOptions = categories.length ? categories.map((c) => c.name) : ["Uncategorized"];
 
   return (
     <Layout>
@@ -234,17 +261,15 @@ const Rules = () => {
                   <div>
                     <Label>Category</Label>
                     <Select value={formData.category} onValueChange={(v) => setFormData({ ...formData, category: v })}>
-                      <SelectTrigger>
+                      <SelectTrigger disabled={categoriesLoading}>
                         <SelectValue placeholder={categoriesLoading ? "Loading..." : "Select category"} />
                       </SelectTrigger>
                       <SelectContent>
-                        {(categories.length ? categories : [{ id: "uncat", name: "Uncategorized", sort: 0 }]).map(
-                          (c) => (
-                            <SelectItem key={c.id} value={c.name}>
-                              {c.name}
-                            </SelectItem>
-                          ),
-                        )}
+                        {categoryOptions.map((cat) => (
+                          <SelectItem key={cat} value={cat}>
+                            {cat}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -267,7 +292,7 @@ const Rules = () => {
                       id="source"
                       value={formData.source}
                       onChange={(e) => setFormData({ ...formData, source: e.target.value })}
-                      placeholder="e.g., CIBC Bank Account"
+                      placeholder="e.g., CIBC Chequing"
                     />
                   </div>
 
@@ -347,7 +372,7 @@ const Rules = () => {
                           <Pencil className="h-4 w-4" />
                         </Button>
                         <Button variant="ghost" size="icon" onClick={() => handleDelete(rule.id)}>
-                          <Trash2 className="h-4 w-4 text-destructive" />
+                          <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
                     </TableCell>
