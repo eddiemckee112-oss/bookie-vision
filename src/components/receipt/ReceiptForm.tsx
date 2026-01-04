@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useDropzone } from "react-dropzone";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,15 +15,17 @@ import { useToast } from "@/hooks/use-toast";
 import { useOrg } from "@/contexts/OrgContext";
 import { useOrgCategories } from "@/hooks/useOrgCategories";
 
-const SOURCES = ["CIBC Bank Account", "Rogers MasterCard", "PC MasterCard", "Cash"];
+const BUCKET = "receipts-warm";
+
+type Account = { id: string; name: string; type: string | null };
 
 interface ReceiptFormData {
   vendor: string;
   receipt_date: Date | undefined;
   total: string;
   tax: string;
-  category: string;
-  source: string;
+  category: string; // stored as name string for now
+  source: string;   // stored as account name string (matches your current schema)
   notes: string;
 }
 
@@ -34,19 +36,29 @@ interface ReceiptFormProps {
 const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
   const { currentOrg } = useOrg();
   const { toast } = useToast();
-  const { categories: orgCategories, loading: categoriesLoading } = useOrgCategories();
+  const { categories: orgCats, loading: catsLoading } = useOrgCategories();
+
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(false);
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
 
-  const categoryOptions = useMemo(() => {
-    // Always include Uncategorized even if missing from DB
-    const names = (orgCategories ?? []).map((c) => c.name).filter(Boolean);
-    if (!names.includes("Uncategorized")) names.unshift("Uncategorized");
-    return names;
-  }, [orgCategories]);
+  const categoryNames = useMemo(() => {
+    const names = orgCats.map((c) => (c.name || "").trim()).filter(Boolean);
+    const uniq = Array.from(new Set(names));
+    // Always include Uncategorized first (works with your DB list too)
+    if (!uniq.includes("Uncategorized")) uniq.unshift("Uncategorized");
+    return uniq;
+  }, [orgCats]);
+
+  const defaultSource = useMemo(() => {
+    // pick Cash if exists else first account name, else blank
+    const cash = accounts.find((a) => a.name?.toLowerCase().includes("cash"));
+    return cash?.name || accounts[0]?.name || "";
+  }, [accounts]);
 
   const [formData, setFormData] = useState<ReceiptFormData>({
     vendor: "",
@@ -54,22 +66,98 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
     total: "",
     tax: "",
     category: "Uncategorized",
-    source: SOURCES[0],
+    source: "",
     notes: "",
   });
 
+  // fetch accounts for org -> used for Source dropdown
+  useEffect(() => {
+    const run = async () => {
+      if (!currentOrg) return;
+      setAccountsLoading(true);
+
+      const { data, error } = await supabase
+        .from("accounts")
+        .select("id, name, type")
+        .eq("org_id", currentOrg.id)
+        .order("name", { ascending: true });
+
+      setAccountsLoading(false);
+
+      if (error) {
+        console.error("Failed to fetch accounts:", error);
+        return;
+      }
+      setAccounts((data as Account[]) ?? []);
+    };
+
+    run();
+  }, [currentOrg?.id]);
+
+  // set default source when accounts load (only if blank)
+  useEffect(() => {
+    if (!formData.source && defaultSource) {
+      setFormData((p) => ({ ...p, source: defaultSource }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultSource]);
+
+  const normalizeCategory = useCallback(
+    (raw: any): string => {
+      const list = categoryNames;
+      if (!raw || typeof raw !== "string") return "Uncategorized";
+
+      const s = raw.trim();
+      if (!s) return "Uncategorized";
+
+      // exact match (case-insensitive)
+      const exact = list.find((c) => c.toLowerCase() === s.toLowerCase());
+      if (exact) return exact;
+
+      const lower = s.toLowerCase();
+
+      // Smart mappings to prevent duplicates / junk categories from AI
+      // Map “food & beverage / restaurant (food & supplies)” into your real category names
+      const map: Array<{ test: (x: string) => boolean; to: string }> = [
+        { test: (x) => x.includes("food") || x.includes("beverage") || x.includes("restaurant (food") || x.includes("supplies"), to: "Food & Supplies" },
+        { test: (x) => x.includes("clean"), to: "Cleaning Supplies" },
+        { test: (x) => x.includes("tool") || x.includes("equipment"), to: "Tools & Equipment" },
+        { test: (x) => x.includes("repair") || x.includes("maintenance"), to: "Repairs & Maintenance" },
+        { test: (x) => x.includes("utilit"), to: "Utilities" },
+        { test: (x) => x.includes("bank fee") || x.includes("interest"), to: "Bank Fees & Interest" },
+        { test: (x) => x.includes("advert") || x.includes("marketing"), to: "Advertising & Marketing" },
+        { test: (x) => x.includes("software") || x.includes("subscription"), to: "Software & Subscriptions" },
+        { test: (x) => x.includes("insur"), to: "Insurance" },
+        { test: (x) => x.includes("tax"), to: "Taxes" },
+        { test: (x) => x.includes("income") || x.includes("sales"), to: "Sales Income" },
+        { test: (x) => x.includes("owner") || x.includes("personal"), to: "Owner / Personal" },
+        { test: (x) => x.includes("building"), to: "Building Supplies" },
+      ];
+
+      for (const m of map) {
+        if (m.test(lower)) {
+          const found = list.find((c) => c.toLowerCase() === m.to.toLowerCase());
+          if (found) return found;
+        }
+      }
+
+      return "Uncategorized";
+    },
+    [categoryNames],
+  );
+
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
-    if (file) {
-      setSelectedFile(file);
+    if (!file) return;
 
-      if (file.type.startsWith("image/")) {
-        const reader = new FileReader();
-        reader.onloadend = () => setPreview(reader.result as string);
-        reader.readAsDataURL(file);
-      } else {
-        setPreview(null);
-      }
+    setSelectedFile(file);
+
+    if (file.type.startsWith("image/")) {
+      const reader = new FileReader();
+      reader.onloadend = () => setPreview(reader.result as string);
+      reader.readAsDataURL(file);
+    } else {
+      setPreview(null);
     }
   }, []);
 
@@ -91,104 +179,70 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
       total: "",
       tax: "",
       category: "Uncategorized",
-      source: SOURCES[0],
+      source: defaultSource || "",
       notes: "",
     });
-  };
-
-  const normalizeCategoryFromAI = (aiCategory: unknown) => {
-    const c = typeof aiCategory === "string" ? aiCategory.trim() : "";
-    if (!c) return "";
-
-    // If AI returns an old label that no longer exists, keep Uncategorized
-    // (You can add mappings here if you want)
-    if (categoryOptions.includes(c)) return c;
-
-    // common old -> new mappings (optional safety)
-    const map: Record<string, string> = {
-      "Food & Supplies": "Restaurant Food & Supplies",
-      "Restaurant Supplies": "Restaurant Food & Supplies",
-      "Food & Beverage": "Restaurant Food & Supplies",
-      "Restaurant (Food & Supplies)": "Restaurant Food & Supplies",
-    };
-
-    const mapped = map[c];
-    if (mapped && categoryOptions.includes(mapped)) return mapped;
-
-    return "";
   };
 
   const handleScanWithAI = async () => {
     if (!selectedFile || !currentOrg) return;
 
     setIsScanning(true);
-    try {
-      const reader = new FileReader();
-      reader.readAsDataURL(selectedFile);
 
-      reader.onloadend = async () => {
-        const base64String = reader.result as string;
+    const reader = new FileReader();
+    reader.readAsDataURL(selectedFile);
 
-        try {
-          const { data, error } = await supabase.functions.invoke("process-receipt", {
-            body: {
-              image: base64String,
-              hint_vendor: formData.vendor,
-              hint_amount: formData.total,
-              hint_date: formData.receipt_date?.toISOString(),
-              source: formData.source,
-            },
-          });
+    reader.onloadend = async () => {
+      const base64String = reader.result as string;
 
-          if (error) throw error;
+      try {
+        const { data, error } = await supabase.functions.invoke("process-receipt", {
+          body: {
+            image: base64String,
+            hint_vendor: formData.vendor,
+            hint_amount: formData.total,
+            hint_date: formData.receipt_date?.toISOString(),
+            source: formData.source,
+          },
+        });
 
-          const receipt = (data as any)?.receiptData ?? (data as any) ?? {};
+        if (error) throw error;
 
-          const aiCategory = normalizeCategoryFromAI(receipt.category);
+        const receipt = (data as any)?.receiptData ?? (data as any) ?? {};
 
-          setFormData((prev) => ({
-            ...prev,
-            vendor: prev.vendor || receipt.vendor || "",
-            receipt_date: prev.receipt_date || (receipt.date ? new Date(receipt.date) : prev.receipt_date),
-            total: prev.total || (receipt.total != null ? String(receipt.total) : prev.total),
-            tax: prev.tax || (receipt.tax != null ? String(receipt.tax) : prev.tax),
-            category:
-              prev.category && prev.category !== "Uncategorized"
-                ? prev.category
-                : aiCategory || prev.category || "Uncategorized",
-            source: prev.source || receipt.source || prev.source,
-            notes: prev.notes || receipt.notes || prev.notes,
-          }));
+        const aiCategory = normalizeCategory(receipt.category);
 
-          toast({
-            title: "AI Scan Complete",
-            description: "Receipt data extracted successfully. Please review and edit as needed.",
-          });
-        } catch (error: any) {
-          console.error("AI scan error:", error);
-          toast({
-            title: "AI Scan Failed",
-            description: error?.message || "Failed to scan receipt with AI. Please enter details manually.",
-            variant: "destructive",
-          });
-        } finally {
-          setIsScanning(false);
-        }
-      };
+        setFormData((prev) => ({
+          ...prev,
+          vendor: prev.vendor || receipt.vendor || "",
+          receipt_date: prev.receipt_date || (receipt.date ? new Date(receipt.date) : prev.receipt_date),
+          total: prev.total || (receipt.total != null ? String(receipt.total) : prev.total),
+          tax: prev.tax || (receipt.tax != null ? String(receipt.tax) : prev.tax),
+          category: prev.category && prev.category !== "Uncategorized" ? prev.category : aiCategory,
+          source: prev.source || receipt.source || prev.source,
+          notes: prev.notes || receipt.notes || prev.notes,
+        }));
 
-      reader.onerror = () => {
-        toast({ title: "Failed to read file", variant: "destructive" });
+        toast({
+          title: "AI Scan Complete",
+          description: "Receipt data extracted. Category was clamped to your org list.",
+        });
+      } catch (err: any) {
+        console.error("AI scan error:", err);
+        toast({
+          title: "AI Scan Failed",
+          description: err?.message || "Failed to scan receipt with AI.",
+          variant: "destructive",
+        });
+      } finally {
         setIsScanning(false);
-      };
-    } catch (error: any) {
-      console.error("AI scan error:", error);
-      toast({
-        title: "AI Scan Failed",
-        description: error?.message || "Failed to scan receipt with AI. Please enter details manually.",
-        variant: "destructive",
-      });
+      }
+    };
+
+    reader.onerror = () => {
+      toast({ title: "Failed to read file", variant: "destructive" });
       setIsScanning(false);
-    }
+    };
   };
 
   const handleUploadReceipt = async () => {
@@ -216,15 +270,11 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
         const fileExt = selectedFile.name.split(".").pop();
         const filePath = `${currentOrg.id}/${timestamp}.${fileExt}`;
 
-        const { error: uploadError } = await supabase.storage.from("receipts-warm").upload(filePath, selectedFile);
-
-        if (!uploadError) {
-          imageUrl = filePath;
-        }
+        const { error: uploadError } = await supabase.storage.from(BUCKET).upload(filePath, selectedFile);
+        if (!uploadError) imageUrl = filePath;
       }
 
-      // if the selected category doesn't exist (stale UI), force Uncategorized
-      const safeCategory = categoryOptions.includes(formData.category) ? formData.category : "Uncategorized";
+      const safeCategory = normalizeCategory(formData.category);
 
       const { error } = await supabase.from("receipts").insert({
         org_id: currentOrg.id,
@@ -233,25 +283,21 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
         total: parseFloat(formData.total),
         tax: formData.tax ? parseFloat(formData.tax) : 0,
         category: safeCategory,
-        source: formData.source,
+        source: formData.source || null,
         notes: formData.notes.trim() || null,
         image_url: imageUrl,
       });
 
       if (error) throw error;
 
-      toast({
-        title: "Receipt Uploaded",
-        description: "Receipt saved successfully",
-      });
-
+      toast({ title: "Receipt Uploaded", description: "Saved successfully" });
       handleClear();
       onSuccess();
-    } catch (error: any) {
-      console.error("Upload error:", error);
+    } catch (err: any) {
+      console.error("Upload error:", err);
       toast({
         title: "Upload Failed",
-        description: error?.message || "Failed to upload receipt",
+        description: err?.message || "Failed to upload receipt",
         variant: "destructive",
       });
     } finally {
@@ -261,7 +307,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
 
   return (
     <div className="space-y-6">
-      {/* File Upload Section */}
+      {/* File Upload */}
       <div className="space-y-4">
         <div
           {...getRootProps()}
@@ -300,7 +346,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
               <Sparkles className="mr-2 h-4 w-4" />
               {isScanning ? "Scanning..." : "Scan with AI"}
             </Button>
-            <Button onClick={handleClear} variant="outline" size="icon">
+            <Button onClick={handleClear} variant="outline" size="icon" title="Clear">
               <X className="h-4 w-4" />
             </Button>
           </div>
@@ -314,7 +360,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
           <Input
             id="vendor"
             value={formData.vendor}
-            onChange={(e) => setFormData((prev) => ({ ...prev, vendor: e.target.value }))}
+            onChange={(e) => setFormData((p) => ({ ...p, vendor: e.target.value }))}
             placeholder="Enter vendor name"
           />
         </div>
@@ -325,10 +371,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
             <PopoverTrigger asChild>
               <Button
                 variant="outline"
-                className={cn(
-                  "w-full justify-start text-left font-normal",
-                  !formData.receipt_date && "text-muted-foreground",
-                )}
+                className={cn("w-full justify-start text-left font-normal", !formData.receipt_date && "text-muted-foreground")}
               >
                 {formData.receipt_date ? format(formData.receipt_date, "PPP") : "Pick a date"}
               </Button>
@@ -337,7 +380,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
               <Calendar
                 mode="single"
                 selected={formData.receipt_date}
-                onSelect={(date) => setFormData((prev) => ({ ...prev, receipt_date: date }))}
+                onSelect={(d) => setFormData((p) => ({ ...p, receipt_date: d }))}
                 initialFocus
                 className="pointer-events-auto"
               />
@@ -352,7 +395,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
             type="number"
             step="0.01"
             value={formData.total}
-            onChange={(e) => setFormData((prev) => ({ ...prev, total: e.target.value }))}
+            onChange={(e) => setFormData((p) => ({ ...p, total: e.target.value }))}
             placeholder="0.00"
           />
         </div>
@@ -364,7 +407,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
             type="number"
             step="0.01"
             value={formData.tax}
-            onChange={(e) => setFormData((prev) => ({ ...prev, tax: e.target.value }))}
+            onChange={(e) => setFormData((p) => ({ ...p, tax: e.target.value }))}
             placeholder="0.00"
           />
         </div>
@@ -373,14 +416,13 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
           <Label htmlFor="category">Category</Label>
           <Select
             value={formData.category}
-            onValueChange={(value) => setFormData((prev) => ({ ...prev, category: value }))}
-            disabled={categoriesLoading || categoryOptions.length === 0}
+            onValueChange={(v) => setFormData((p) => ({ ...p, category: v }))}
           >
             <SelectTrigger>
-              <SelectValue placeholder={categoriesLoading ? "Loading categories..." : "Select category"} />
+              <SelectValue placeholder={catsLoading ? "Loading categories..." : "Choose a category"} />
             </SelectTrigger>
             <SelectContent>
-              {categoryOptions.map((cat) => (
+              {categoryNames.map((cat) => (
                 <SelectItem key={cat} value={cat}>
                   {cat}
                 </SelectItem>
@@ -392,18 +434,25 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
         <div className="space-y-2">
           <Label htmlFor="source">Source</Label>
           <Select
-            value={formData.source}
-            onValueChange={(value) => setFormData((prev) => ({ ...prev, source: value }))}
+            value={formData.source || ""}
+            onValueChange={(v) => setFormData((p) => ({ ...p, source: v }))}
           >
             <SelectTrigger>
-              <SelectValue />
+              <SelectValue placeholder={accountsLoading ? "Loading accounts..." : "Choose source"} />
             </SelectTrigger>
             <SelectContent>
-              {SOURCES.map((src) => (
-                <SelectItem key={src} value={src}>
-                  {src}
-                </SelectItem>
-              ))}
+              {accounts.length === 0 ? (
+                <SelectItem value="Cash">Cash</SelectItem>
+              ) : (
+                accounts
+                  .map((a) => (a.name || "").trim())
+                  .filter(Boolean)
+                  .map((name) => (
+                    <SelectItem key={name} value={name}>
+                      {name}
+                    </SelectItem>
+                  ))
+              )}
             </SelectContent>
           </Select>
         </div>
@@ -413,7 +462,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
           <Textarea
             id="notes"
             value={formData.notes}
-            onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))}
+            onChange={(e) => setFormData((p) => ({ ...p, notes: e.target.value }))}
             placeholder="Additional notes..."
             rows={3}
           />
