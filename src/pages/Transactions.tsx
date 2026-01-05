@@ -51,73 +51,10 @@ type OrgCategory = {
   is_active: boolean;
 };
 
-// ✅ vendor_rules row
-type VendorRuleRow = {
-  vendor_pattern: string;
-  category: string | null;
-  direction_filter: string | null;
-};
-
-// ✅ optional rules row (safe if table exists)
-type RuleRow = {
-  match_pattern: string;
-  default_category: string | null;
-};
-
 const pad2 = (n: number) => String(n).padStart(2, "0");
 const firstDayOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
 const lastDayOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
 const toYMD = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-
-const chunk = <T,>(arr: T[], size: number) => {
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-};
-
-const safeRegexTest = (pattern: string, text: string) => {
-  try {
-    return new RegExp(pattern, "i").test(text);
-  } catch {
-    return false;
-  }
-};
-
-const isSquareIncome = (txn: { description: string; direction: string }) => {
-  if (txn.direction !== "credit") return false;
-  return /square/i.test(txn.description);
-};
-
-const pickCategoryFromRules = (
-  txn: { description: string; vendor_clean?: string | null; direction: string },
-  vendorRules: VendorRuleRow[],
-  rules: RuleRow[],
-) => {
-  // 1) Square credits => Sales Income (if you like this behavior)
-  if (isSquareIncome(txn)) return "Sales Income";
-
-  // 2) vendor_rules first (most specific)
-  for (const vr of vendorRules) {
-    const matchesVendor =
-      safeRegexTest(vr.vendor_pattern, txn.description) ||
-      (txn.vendor_clean ? safeRegexTest(vr.vendor_pattern, txn.vendor_clean) : false);
-
-    const matchesDirection = !vr.direction_filter || vr.direction_filter === txn.direction;
-
-    if (matchesVendor && matchesDirection) return vr.category || null;
-  }
-
-  // 3) optional fallback rules table (if it exists + enabled rules live there)
-  for (const r of rules) {
-    const matches =
-      safeRegexTest(r.match_pattern, txn.description) ||
-      (txn.vendor_clean ? safeRegexTest(r.match_pattern, txn.vendor_clean) : false);
-
-    if (matches) return r.default_category || null;
-  }
-
-  return null;
-};
 
 const Transactions = () => {
   const { currentOrg, loading: orgLoading } = useOrg();
@@ -150,9 +87,6 @@ const Transactions = () => {
   const [showManageCats, setShowManageCats] = useState(false);
   const [newCatName, setNewCatName] = useState("");
   const [catSaving, setCatSaving] = useState(false);
-
-  // ✅ Apply Rules busy state
-  const [isApplyingRules, setIsApplyingRules] = useState(false);
 
   const dateWindow = useMemo(() => {
     const now = new Date();
@@ -418,132 +352,6 @@ const Transactions = () => {
     setDeletingId(null);
   };
 
-  // ✅ APPLY RULES (real)
-  const applyRules = async () => {
-    if (!currentOrg) return;
-
-    setIsApplyingRules(true);
-    try {
-      // ensure latest categories
-      const { data: catsRaw, error: catsErr } = await supabase
-        .from("org_categories")
-        .select("id,org_id,name,sort_order,is_active")
-        .eq("org_id", currentOrg.id)
-        .eq("is_active", true);
-
-      if (catsErr) throw catsErr;
-
-      const allowed = new Set<string>((catsRaw as any[] | null)?.map((c) => c.name) ?? []);
-      allowed.add("Uncategorized");
-
-      // vendor_rules (primary)
-      const { data: vendorRulesRaw, error: vrErr } = await supabase
-        .from("vendor_rules")
-        .select("vendor_pattern, category, direction_filter")
-        .eq("org_id", currentOrg.id);
-
-      if (vrErr) throw vrErr;
-
-      // optional rules table (ignore if missing)
-      let rules: RuleRow[] = [];
-      try {
-        const { data: rulesRaw, error: rErr } = await supabase
-          .from("rules")
-          .select("match_pattern, default_category")
-          .eq("org_id", currentOrg.id)
-          .eq("enabled", true);
-
-        if (!rErr && rulesRaw) rules = rulesRaw as any;
-      } catch {
-        // ignore
-      }
-
-      const vendorRules = (vendorRulesRaw || []) as VendorRuleRow[];
-
-      // pull candidate txns (only blanks in the current window)
-      let q = supabase
-        .from("transactions")
-        .select("id, description, vendor_clean, direction, category, txn_date")
-        .eq("org_id", currentOrg.id);
-
-      if (dateWindow.from) q = q.gte("txn_date", dateWindow.from);
-      if (dateWindow.to) q = q.lte("txn_date", dateWindow.to);
-
-      // only fill blanks/unclassified
-      q = q.or("category.is.null,category.eq.,category.eq.Uncategorized");
-
-      const { data: txRaw, error: txErr } = await q.order("txn_date", { ascending: false }).limit(5000);
-      if (txErr) throw txErr;
-
-      const txns = (txRaw || []) as Array<{
-        id: string;
-        description: string;
-        vendor_clean: string | null;
-        direction: string;
-        category: string | null;
-      }>;
-
-      if (txns.length === 0) {
-        toast({ title: "Apply Rules", description: "Nothing to update in this date window." });
-        return;
-      }
-
-      const updates = txns
-        .map((t) => {
-          const computed = pickCategoryFromRules(
-            { description: t.description, vendor_clean: t.vendor_clean, direction: t.direction },
-            vendorRules,
-            rules,
-          );
-
-          const finalCat = computed && allowed.has(computed) ? computed : "Uncategorized";
-          const current = (t.category ?? "") || "Uncategorized";
-
-          if (finalCat === current) return null;
-          return { id: t.id, category: finalCat };
-        })
-        .filter(Boolean) as Array<{ id: string; category: string }>;
-
-      if (updates.length === 0) {
-        toast({ title: "Apply Rules", description: "No changes needed." });
-        return;
-      }
-
-      // update in small batches
-      let updated = 0;
-      const batches = chunk(updates, 25);
-
-      for (const batch of batches) {
-        await Promise.all(
-          batch.map(async (u) => {
-            const { error } = await supabase
-              .from("transactions")
-              .update({ category: u.category })
-              .eq("org_id", currentOrg.id)
-              .eq("id", u.id);
-
-            if (!error) updated += 1;
-          }),
-        );
-      }
-
-      toast({ title: "Apply Rules complete", description: `Updated ${updated} transaction(s).` });
-
-      // refresh UI data + category dropdown list
-      await loadOrgCategories();
-      await fetchTransactions();
-    } catch (e: any) {
-      console.error("Apply rules failed:", e);
-      toast({
-        title: "Apply Rules failed",
-        description: e?.message ?? "Unknown error",
-        variant: "destructive",
-      });
-    } finally {
-      setIsApplyingRules(false);
-    }
-  };
-
   const categoryNames = useMemo(() => orgCategories.map((c) => c.name), [orgCategories]);
 
   const filteredTransactions = transactions.filter((t) => {
@@ -678,9 +486,16 @@ const Transactions = () => {
               >
                 Auto Match
               </Button>
-
-              <Button variant="outline" onClick={applyRules} disabled={isApplyingRules}>
-                {isApplyingRules ? "Applying..." : "Apply Rules"}
+              <Button
+                variant="outline"
+                onClick={() =>
+                  toast({
+                    title: "Apply Rules (later)",
+                    description: "Finish importing months first.",
+                  })
+                }
+              >
+                Apply Rules
               </Button>
             </div>
           </div>
@@ -716,8 +531,13 @@ const Transactions = () => {
                     const legacyCategory =
                       txn.category && !categoryNames.includes(txn.category) ? txn.category : null;
 
+                    const isUncat = !txn.category || txn.category === "Uncategorized";
+
                     return (
-                      <TableRow key={txn.id}>
+                      <TableRow
+                        key={txn.id}
+                        className={isUncat ? "bg-amber-50/60" : undefined}
+                      >
                         <TableCell className="whitespace-nowrap">{txn.txn_date}</TableCell>
 
                         <TableCell className="min-w-[360px]">
@@ -731,15 +551,27 @@ const Transactions = () => {
                           ${Number(txn.amount ?? 0).toFixed(2)}
                         </TableCell>
 
+                        {/* ✅ Debit vs Credit color */}
                         <TableCell className="whitespace-nowrap">
-                          <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs">
+                          <span
+                            className={[
+                              "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium",
+                              txn.direction === "debit"
+                                ? "bg-red-50 text-red-700 border-red-200"
+                                : "bg-emerald-50 text-emerald-700 border-emerald-200",
+                            ].join(" ")}
+                          >
                             {txn.direction}
                           </span>
                         </TableCell>
 
+                        {/* ✅ Category dropdown + subtle border if uncategorized */}
                         <TableCell className="min-w-[240px]">
                           <select
-                            className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                            className={[
+                              "h-9 w-full rounded-md border bg-background px-3 text-sm",
+                              isUncat ? "border-amber-200" : "",
+                            ].join(" ")}
                             value={txn.category ?? ""}
                             disabled={updatingCategoryId === txn.id}
                             onChange={(e) => updateCategory(txn.id, e.target.value || null)}
@@ -756,6 +588,10 @@ const Transactions = () => {
                               </option>
                             ))}
                           </select>
+
+                          {isUncat ? (
+                            <div className="mt-1 text-[11px] text-amber-700">Needs category</div>
+                          ) : null}
                         </TableCell>
 
                         <TableCell className="whitespace-nowrap">{txn.source_account_name || "—"}</TableCell>
