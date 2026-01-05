@@ -41,6 +41,15 @@ interface LinkedReceipt {
   total: number;
 }
 
+interface VendorRule {
+  id: string;
+  vendor_pattern: string;
+  category: string | null;
+  auto_match: boolean;
+  source: string | null;
+  direction_filter: string | null;
+}
+
 type DateMode = "this_month" | "last_month" | "month" | "range" | "all";
 
 type OrgCategory = {
@@ -54,7 +63,14 @@ type OrgCategory = {
 const pad2 = (n: number) => String(n).padStart(2, "0");
 const firstDayOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
 const lastDayOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
-const toYMD = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const toYMD = (d: Date) =>
+  `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+
+const norm = (s?: string | null) => (s ?? "").trim().toLowerCase();
+const isEmptyCategory = (cat: string | null) => {
+  const v = norm(cat);
+  return v === "" || v === "uncategorized" || v === "un-categorized";
+};
 
 const Transactions = () => {
   const { currentOrg, loading: orgLoading } = useOrg();
@@ -87,6 +103,9 @@ const Transactions = () => {
   const [showManageCats, setShowManageCats] = useState(false);
   const [newCatName, setNewCatName] = useState("");
   const [catSaving, setCatSaving] = useState(false);
+
+  // ✅ Apply Rules busy
+  const [isApplyingRules, setIsApplyingRules] = useState(false);
 
   const dateWindow = useMemo(() => {
     const now = new Date();
@@ -373,6 +392,124 @@ const Transactions = () => {
     return true;
   });
 
+  // ✅ Apply rules (works again)
+  const applyRules = async () => {
+    if (!currentOrg) return;
+
+    setIsApplyingRules(true);
+    try {
+      // 1) Load vendor rules
+      const { data: rulesData, error: rulesError } = await supabase
+        .from("vendor_rules")
+        .select("id,vendor_pattern,category,auto_match,source,direction_filter")
+        .eq("org_id", currentOrg.id)
+        .order("created_at", { ascending: false });
+
+      if (rulesError) throw rulesError;
+
+      const rules = (rulesData as any as VendorRule[]) || [];
+      if (rules.length === 0) {
+        toast({ title: "No rules found", description: "Create vendor rules first." });
+        return;
+      }
+
+      // 2) Decide changes in-memory (do NOT overwrite already-categorized)
+      const updatesByCategory = new Map<string | null, string[]>(); // category -> txnIds
+
+      const allowed = new Set(categoryNames.map((c) => norm(c)));
+
+      const getCategoryIfAllowed = (cat: string | null): string | null => {
+        if (!cat) return null;
+        const c = cat.trim();
+        if (!c) return null;
+        // Only allow categories that exist in org_categories
+        return allowed.has(norm(c)) ? c : null;
+      };
+
+      const matchesRule = (txn: Transaction, rule: VendorRule) => {
+        const pat = norm(rule.vendor_pattern);
+        if (!pat) return false;
+
+        // Optional filters
+        if (rule.source && norm(rule.source) !== norm(txn.source_account_name)) return false;
+        if (rule.direction_filter && norm(rule.direction_filter) !== norm(txn.direction)) return false;
+
+        const hay = `${txn.vendor_clean ?? ""} ${txn.description ?? ""}`.toLowerCase();
+        return hay.includes(pat);
+      };
+
+      let proposedCount = 0;
+
+      for (const txn of transactions) {
+        // Only apply to uncategorized
+        if (!isEmptyCategory(txn.category)) continue;
+
+        const rule = rules.find((r) => matchesRule(txn, r));
+        if (!rule) continue;
+
+        const newCat = getCategoryIfAllowed(rule.category);
+        // If rule category isn't in org_categories, we skip it to avoid junk categories
+        if (!newCat) continue;
+
+        proposedCount++;
+        const list = updatesByCategory.get(newCat) ?? [];
+        list.push(txn.id);
+        updatesByCategory.set(newCat, list);
+      }
+
+      if (proposedCount === 0) {
+        toast({
+          title: "No changes",
+          description: "No uncategorized transactions matched your rules (or rule categories aren’t in your category list).",
+        });
+        return;
+      }
+
+      // 3) Batch update by category (few calls)
+      let updated = 0;
+      for (const [cat, ids] of updatesByCategory.entries()) {
+        // chunk in case you have tons
+        const chunkSize = 200;
+        for (let i = 0; i < ids.length; i += chunkSize) {
+          const chunk = ids.slice(i, i + chunkSize);
+
+          const { error } = await supabase
+            .from("transactions")
+            .update({ category: cat })
+            .eq("org_id", currentOrg.id)
+            .in("id", chunk);
+
+          if (error) throw error;
+          updated += chunk.length;
+        }
+      }
+
+      // 4) Refresh view
+      await fetchTransactions();
+
+      toast({
+        title: "Rules applied",
+        description: `Updated ${updated} transaction${updated === 1 ? "" : "s"}.`,
+      });
+    } catch (e: any) {
+      toast({
+        title: "Apply Rules failed",
+        description: e?.message ?? "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setIsApplyingRules(false);
+    }
+  };
+
+  // (Auto Match later)
+  const autoMatch = () => {
+    toast({
+      title: "Auto Match (later)",
+      description: "Finish importing months first.",
+    });
+  };
+
   if (orgLoading) {
     return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
   }
@@ -436,11 +573,7 @@ const Transactions = () => {
                         <b>{c.name}</b>{" "}
                         <span className="text-xs text-muted-foreground">({c.sort_order})</span>
                       </div>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => deleteCategory(c.id, c.name)}
-                      >
+                      <Button variant="destructive" size="sm" onClick={() => deleteCategory(c.id, c.name)}>
                         Delete
                       </Button>
                     </div>
@@ -475,27 +608,11 @@ const Transactions = () => {
             </div>
 
             <div className="flex gap-2">
-              <Button
-                variant="outline"
-                onClick={() =>
-                  toast({
-                    title: "Auto Match (later)",
-                    description: "Finish importing months first.",
-                  })
-                }
-              >
+              <Button variant="outline" onClick={autoMatch}>
                 Auto Match
               </Button>
-              <Button
-                variant="outline"
-                onClick={() =>
-                  toast({
-                    title: "Apply Rules (later)",
-                    description: "Finish importing months first.",
-                  })
-                }
-              >
-                Apply Rules
+              <Button variant="outline" onClick={applyRules} disabled={isApplyingRules}>
+                {isApplyingRules ? "Applying..." : "Apply Rules"}
               </Button>
             </div>
           </div>
@@ -531,12 +648,12 @@ const Transactions = () => {
                     const legacyCategory =
                       txn.category && !categoryNames.includes(txn.category) ? txn.category : null;
 
-                    const isUncat = !txn.category || txn.category === "Uncategorized";
+                    const uncategorized = isEmptyCategory(txn.category);
 
                     return (
                       <TableRow
                         key={txn.id}
-                        className={isUncat ? "bg-amber-50/60" : undefined}
+                        className={uncategorized ? "bg-yellow-50" : ""}
                       >
                         <TableCell className="whitespace-nowrap">{txn.txn_date}</TableCell>
 
@@ -551,27 +668,21 @@ const Transactions = () => {
                           ${Number(txn.amount ?? 0).toFixed(2)}
                         </TableCell>
 
-                        {/* ✅ Debit vs Credit color */}
                         <TableCell className="whitespace-nowrap">
                           <span
-                            className={[
-                              "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium",
-                              txn.direction === "debit"
-                                ? "bg-red-50 text-red-700 border-red-200"
-                                : "bg-emerald-50 text-emerald-700 border-emerald-200",
-                            ].join(" ")}
+                            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs ${
+                              norm(txn.direction) === "debit"
+                                ? "bg-red-50 text-red-700"
+                                : "bg-green-50 text-green-700"
+                            }`}
                           >
                             {txn.direction}
                           </span>
                         </TableCell>
 
-                        {/* ✅ Category dropdown + subtle border if uncategorized */}
                         <TableCell className="min-w-[240px]">
                           <select
-                            className={[
-                              "h-9 w-full rounded-md border bg-background px-3 text-sm",
-                              isUncat ? "border-amber-200" : "",
-                            ].join(" ")}
+                            className="h-9 w-full rounded-md border bg-background px-3 text-sm"
                             value={txn.category ?? ""}
                             disabled={updatingCategoryId === txn.id}
                             onChange={(e) => updateCategory(txn.id, e.target.value || null)}
@@ -588,10 +699,6 @@ const Transactions = () => {
                               </option>
                             ))}
                           </select>
-
-                          {isUncat ? (
-                            <div className="mt-1 text-[11px] text-amber-700">Needs category</div>
-                          ) : null}
                         </TableCell>
 
                         <TableCell className="whitespace-nowrap">{txn.source_account_name || "—"}</TableCell>
