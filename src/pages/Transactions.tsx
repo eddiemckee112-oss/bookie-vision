@@ -27,6 +27,8 @@ interface Transaction {
   direction: string; // "debit" | "credit"
   category: string | null;
   source_account_name: string | null;
+  account_id?: string | null;
+  created_at?: string;
 }
 
 interface Match {
@@ -60,6 +62,11 @@ type OrgCategory = {
   is_active: boolean;
 };
 
+type AccountRow = {
+  id: string;
+  name: string;
+};
+
 const pad2 = (n: number) => String(n).padStart(2, "0");
 const firstDayOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
 const lastDayOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
@@ -71,6 +78,8 @@ const isEmptyCategory = (cat: string | null) => {
   const v = norm(cat);
   return v === "" || v === "uncategorized" || v === "un-categorized";
 };
+
+const PAGE_SIZE = 500;
 
 const Transactions = () => {
   const { currentOrg, loading: orgLoading } = useOrg();
@@ -107,6 +116,16 @@ const Transactions = () => {
   // ✅ Apply Rules busy
   const [isApplyingRules, setIsApplyingRules] = useState(false);
 
+  // ✅ Accounts + account filter
+  const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(false);
+  const [selectedAccountId, setSelectedAccountId] = useState<string>("all");
+
+  // ✅ Pagination state
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+
   const dateWindow = useMemo(() => {
     const now = new Date();
 
@@ -137,11 +156,40 @@ const Transactions = () => {
       return;
     }
 
-    fetchTransactions();
+    // reset paging whenever org/date/account changes
+    setPage(0);
+    setHasMore(true);
+
+    fetchTransactions({ reset: true });
     fetchMatches();
     loadOrgCategories();
+    loadAccounts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentOrg, orgLoading, navigate, dateMode, monthValue, startDate, endDate]);
+  }, [currentOrg, orgLoading, navigate, dateMode, monthValue, startDate, endDate, selectedAccountId]);
+
+  const loadAccounts = async () => {
+    if (!currentOrg) return;
+    setAccountsLoading(true);
+
+    const { data, error } = await supabase
+      .from("accounts")
+      .select("id,name")
+      .eq("org_id", currentOrg.id)
+      .order("created_at", { ascending: false });
+
+    setAccountsLoading(false);
+
+    if (error) {
+      toast({
+        title: "Could not load accounts",
+        description: error.message,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setAccounts((data as any) || []);
+  };
 
   const loadOrgCategories = async () => {
     if (!currentOrg) return;
@@ -235,14 +283,31 @@ const Transactions = () => {
     toast({ title: "Category deleted" });
   };
 
-  const fetchTransactions = async () => {
+  const fetchTransactions = async (opts?: { reset?: boolean }) => {
     if (!currentOrg) return;
 
+    const reset = opts?.reset ?? true;
+    const nextPage = reset ? 0 : page;
+
+    const fromIdx = nextPage * PAGE_SIZE;
+    const toIdx = fromIdx + PAGE_SIZE - 1;
+
+    if (!reset) setIsLoadingMore(true);
+
     let q = supabase.from("transactions").select("*").eq("org_id", currentOrg.id);
+
+    if (selectedAccountId !== "all") {
+      q = q.eq("account_id", selectedAccountId);
+    }
+
     if (dateWindow.from) q = q.gte("txn_date", dateWindow.from);
     if (dateWindow.to) q = q.lte("txn_date", dateWindow.to);
 
-    const { data, error } = await q.order("txn_date", { ascending: false }).limit(500);
+    const { data, error } = await q
+      .order("txn_date", { ascending: false })
+      .range(fromIdx, toIdx);
+
+    if (!reset) setIsLoadingMore(false);
 
     if (error) {
       toast({
@@ -253,7 +318,17 @@ const Transactions = () => {
       return;
     }
 
-    setTransactions((data as any) || []);
+    const rows = (data as any) || [];
+
+    if (reset) {
+      setTransactions(rows);
+      setPage(1);
+    } else {
+      setTransactions((prev) => [...prev, ...rows]);
+      setPage((p) => p + 1);
+    }
+
+    setHasMore(rows.length === PAGE_SIZE);
   };
 
   const fetchMatches = async () => {
@@ -320,7 +395,9 @@ const Transactions = () => {
       return;
     }
 
-    setTransactions((prev) => prev.map((t) => (t.id === txnId ? { ...t, category: newCategory } : t)));
+    setTransactions((prev) =>
+      prev.map((t) => (t.id === txnId ? { ...t, category: newCategory } : t)),
+    );
     setUpdatingCategoryId(null);
   };
 
@@ -460,7 +537,8 @@ const Transactions = () => {
       if (proposedCount === 0) {
         toast({
           title: "No changes",
-          description: "No uncategorized transactions matched your rules (or rule categories aren’t in your category list).",
+          description:
+            "No uncategorized transactions matched your rules (or rule categories aren’t in your category list).",
         });
         return;
       }
@@ -484,8 +562,10 @@ const Transactions = () => {
         }
       }
 
-      // 4) Refresh view
-      await fetchTransactions();
+      // 4) Refresh view (reset paging)
+      setPage(0);
+      setHasMore(true);
+      await fetchTransactions({ reset: true });
 
       toast({
         title: "Rules applied",
@@ -520,15 +600,16 @@ const Transactions = () => {
         <div>
           <h1 className="text-3xl font-bold">Transactions</h1>
           <p className="text-muted-foreground">
-            Showing up to 500 transactions for your selected date window
+            Showing up to {PAGE_SIZE} transactions per page for your selected date window
             {dateWindow.from && dateWindow.to ? ` (${dateWindow.from} → ${dateWindow.to})` : ""}
+            {selectedAccountId !== "all" ? " (filtered by account)" : ""}
           </p>
         </div>
 
         {currentOrg && (
           <div className="space-y-4">
-            <CSVUploader orgId={currentOrg.id} onUploadComplete={fetchTransactions} />
-            <BankSyncSection orgId={currentOrg.id} onSyncComplete={fetchTransactions} />
+            <CSVUploader orgId={currentOrg.id} onUploadComplete={() => fetchTransactions({ reset: true })} />
+            <BankSyncSection orgId={currentOrg.id} onSyncComplete={() => fetchTransactions({ reset: true })} />
           </div>
         )}
 
@@ -568,7 +649,10 @@ const Transactions = () => {
               ) : (
                 <div className="grid gap-2">
                   {orgCategories.map((c) => (
-                    <div key={c.id} className="flex items-center justify-between rounded-md border px-3 py-2">
+                    <div
+                      key={c.id}
+                      className="flex items-center justify-between rounded-md border px-3 py-2"
+                    >
                       <div className="text-sm">
                         <b>{c.name}</b>{" "}
                         <span className="text-xs text-muted-foreground">({c.sort_order})</span>
@@ -586,6 +670,24 @@ const Transactions = () => {
               </div>
             </div>
           )}
+
+          {/* ✅ Account filter (minimal, does not change layout style) */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="text-sm text-muted-foreground">Account:</div>
+            <select
+              className="h-9 rounded-md border bg-background px-3 text-sm"
+              value={selectedAccountId}
+              onChange={(e) => setSelectedAccountId(e.target.value)}
+              disabled={accountsLoading}
+            >
+              <option value="all">{accountsLoading ? "Loading..." : "All"}</option>
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          </div>
 
           <TransactionFilters
             searchQuery={searchQuery}
@@ -651,10 +753,7 @@ const Transactions = () => {
                     const uncategorized = isEmptyCategory(txn.category);
 
                     return (
-                      <TableRow
-                        key={txn.id}
-                        className={uncategorized ? "bg-yellow-50" : ""}
-                      >
+                      <TableRow key={txn.id} className={uncategorized ? "bg-yellow-50" : ""}>
                         <TableCell className="whitespace-nowrap">{txn.txn_date}</TableCell>
 
                         <TableCell className="min-w-[360px]">
@@ -701,7 +800,9 @@ const Transactions = () => {
                           </select>
                         </TableCell>
 
-                        <TableCell className="whitespace-nowrap">{txn.source_account_name || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          {txn.source_account_name || "—"}
+                        </TableCell>
 
                         <TableCell className="whitespace-nowrap">
                           {receipt ? (
@@ -744,6 +845,19 @@ const Transactions = () => {
               </TableBody>
             </Table>
           </div>
+
+          {/* ✅ Pagination (minimal UI) */}
+          {hasMore && (
+            <div className="flex justify-center pt-4">
+              <Button
+                variant="outline"
+                onClick={() => fetchTransactions({ reset: false })}
+                disabled={isLoadingMore}
+              >
+                {isLoadingMore ? "Loading..." : "Load more"}
+              </Button>
+            </div>
+          )}
 
           <div className="text-sm text-muted-foreground">
             Tip: Import <b>This Month</b> first. Once it looks good, switch months and import the next batch.
