@@ -61,13 +61,14 @@ serve(async (req) => {
   try {
     const authHeader = req.headers.get("authorization");
     if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: "Missing authorization header" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ error: "Missing authorization header" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    const { csvContent, orgId, accountId, accountName, institution, sourceAccountName } = await req.json();
+    const { csvContent, orgId, accountId, accountName, institution, sourceAccountName } =
+      await req.json();
 
     if (!csvContent || !orgId) {
       throw new Error("Missing required parameters");
@@ -77,10 +78,10 @@ serve(async (req) => {
     const csvSizeBytes = new TextEncoder().encode(csvContent).length;
     const maxSizeBytes = 5 * 1024 * 1024;
     if (csvSizeBytes > maxSizeBytes) {
-      return new Response(
-        JSON.stringify({ error: "CSV file too large. Maximum size is 5MB." }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ error: "CSV file too large. Maximum size is 5MB." }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
@@ -92,10 +93,10 @@ serve(async (req) => {
     const lines = csvContent.split("\n").filter((line: string) => line.trim());
 
     if (lines.length === 0) {
-      return new Response(
-        JSON.stringify({ error: "CSV file is empty" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ error: "CSV file is empty" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // Validate row count (max 1000 rows)
@@ -103,7 +104,10 @@ serve(async (req) => {
     if (lines.length > maxRows + 1) {
       return new Response(
         JSON.stringify({ error: `CSV has too many rows. Maximum is ${maxRows} transactions.` }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
       );
     }
 
@@ -211,14 +215,37 @@ serve(async (req) => {
     const vendorRules = (vendorRulesRaw || []) as VendorRuleRow[];
     const rules = (rulesRaw || []) as RuleRow[];
 
+    // ✅ Load allowed categories from org_categories and force every txn into that list or "Uncategorized"
+    const { data: categoriesRaw, error: cErr } = await supabase
+      .from("org_categories")
+      .select("name")
+      .eq("org_id", orgId)
+      .eq("is_active", true);
+
+    if (cErr) throw cErr;
+
+    const allowedCategorySet = new Set(
+      (categoriesRaw || [])
+        .map((c: any) => (c?.name ?? "").trim())
+        .filter((name: string) => name.length > 0)
+    );
+
+    const UNCATEGORIZED = "Uncategorized";
+    allowedCategorySet.add(UNCATEGORIZED);
+
+    const coerceToAllowedCategory = (cat: string | null): string => {
+      const trimmed = (cat ?? "").trim();
+      if (!trimmed) return UNCATEGORIZED;
+      if (!allowedCategorySet.has(trimmed)) return UNCATEGORIZED;
+      return trimmed;
+    };
+
     // Prefer UI-provided labels
     const finalInstitution = (institution || "").trim() || null;
     const finalSourceAccountName =
-      (sourceAccountName || "").trim() ||
-      (accountName || "").trim() ||
-      "Bank CSV";
+      (sourceAccountName || "").trim() || (accountName || "").trim() || "Bank CSV";
 
-    // Insert transactions (category computed by YOUR RULES)
+    // Insert transactions (category computed by YOUR RULES, then clamped to allowed backend list)
     const transactionsToInsert = (parsedData.transactions || []).map((txn: any) => {
       const direction = txn.amount >= 0 ? "credit" : "debit";
       const vendor_clean = txn.vendor || null;
@@ -229,6 +256,8 @@ serve(async (req) => {
         rules
       );
 
+      const finalCategory = coerceToAllowedCategory(categoryFromRules);
+
       return {
         org_id: orgId,
         account_id: accountId || null,
@@ -236,7 +265,7 @@ serve(async (req) => {
         description: txn.description,
         amount: Math.abs(txn.amount),
         direction,
-        category: categoryFromRules, // ✅ YOUR categories now
+        category: finalCategory, // ✅ ONLY allowed org_categories, else "Uncategorized"
         vendor_clean,
         institution: finalInstitution,
         source_account_name: finalSourceAccountName, // ✅ never “CSV Import” again
@@ -255,7 +284,9 @@ serve(async (req) => {
       throw insertError;
     }
 
-    const categorized = (insertedData || []).filter((x) => x.category).length;
+    const categorized = (insertedData || []).filter(
+      (x) => x.category && x.category !== "Uncategorized"
+    ).length;
 
     return new Response(
       JSON.stringify({
