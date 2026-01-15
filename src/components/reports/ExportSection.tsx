@@ -15,19 +15,13 @@ const ExportSection = ({ orgId, fromDate, toDate }: ExportSectionProps) => {
   const { toast } = useToast();
 
   const sanitizeCSV = (value: any) => {
-    if (value === null || value === undefined) return '';
+    if (value === null || value === undefined) return "";
     const str = String(value);
-    // Prevent CSV injection
-    if (/^[=+\-@|]/.test(str)) {
-      return "'" + str;
-    }
-    // Escape quotes
+    if (/^[=+\-@|]/.test(str)) return "'" + str;
     return '"' + str.replace(/"/g, '""') + '"';
   };
 
-  const formatDateForFilename = () => {
-    return format(new Date(), "yyyy-MM-dd");
-  };
+  const formatDateForFilename = () => format(new Date(), "yyyy-MM-dd");
 
   const downloadCSV = (csv: string, filename: string) => {
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -39,24 +33,56 @@ const ExportSection = ({ orgId, fromDate, toDate }: ExportSectionProps) => {
     URL.revokeObjectURL(url);
   };
 
+  // ✅ Real fix: pull ALL rows with paging (no 1000 cap)
+  const fetchAll = async <T,>(
+    queryFactory: (from: number, to: number) => Promise<{ data: T[] | null; error: any }>,
+    pageSize = 1000
+  ): Promise<T[]> => {
+    const out: T[] = [];
+    let from = 0;
+
+    while (true) {
+      const to = from + pageSize - 1;
+      const { data, error } = await queryFactory(from, to);
+      if (error) throw error;
+
+      const rows = (data ?? []) as T[];
+      out.push(...rows);
+
+      if (rows.length < pageSize) break;
+      from += pageSize;
+    }
+
+    return out;
+  };
+
+  // ✅ Cash detector (safe defaults). Once you show me receipts columns, we’ll tighten it.
+  const isCashReceipt = (r: any) => {
+    const hay = `${r?.source ?? ""} ${r?.notes ?? ""} ${r?.vendor ?? ""} ${r?.payment_method ?? ""} ${r?.tender_type ?? ""}`.toLowerCase();
+    if (r?.is_cash === true) return true;
+    if (r?.paid_cash === true) return true;
+    if (hay.includes("cash")) return true;
+    return false;
+  };
+
   const exportReceipts = async () => {
     try {
-      let query = supabase
-        .from("receipts")
-        .select("*")
-        .eq("org_id", orgId)
-        .order("receipt_date", { ascending: false });
+      const from = fromDate ? format(fromDate, "yyyy-MM-dd") : null;
+      const to = toDate ? format(toDate, "yyyy-MM-dd") : null;
 
-      if (fromDate) {
-        query = query.gte("receipt_date", format(fromDate, "yyyy-MM-dd"));
-      }
-      if (toDate) {
-        query = query.lte("receipt_date", format(toDate, "yyyy-MM-dd"));
-      }
+      const allReceipts = await fetchAll<any>(async (rangeFrom, rangeTo) => {
+        let query = supabase
+          .from("receipts")
+          .select("*")
+          .eq("org_id", orgId)
+          .order("receipt_date", { ascending: false })
+          .range(rangeFrom, rangeTo);
 
-      const { data, error } = await query;
+        if (from) query = query.gte("receipt_date", from);
+        if (to) query = query.lte("receipt_date", to);
 
-      if (error) throw error;
+        return await query;
+      });
 
       const headers = [
         "receipt_id",
@@ -69,27 +95,29 @@ const ExportSection = ({ orgId, fromDate, toDate }: ExportSectionProps) => {
         "source",
         "notes",
         "image_url",
-        "reconciled"
+        "reconciled",
       ];
 
-      const rows = (data || []).map((r: any) => [
-        sanitizeCSV(r.id),
-        sanitizeCSV(r.receipt_date),
-        sanitizeCSV(r.vendor),
-        r.total,
-        r.tax,
-        r.subtotal,
-        sanitizeCSV(r.category),
-        sanitizeCSV(r.source),
-        sanitizeCSV(r.notes),
-        sanitizeCSV(r.image_url),
-        r.reconciled
-      ].join(","));
+      const rows = (allReceipts || []).map((r: any) =>
+        [
+          sanitizeCSV(r.id),
+          sanitizeCSV(r.receipt_date),
+          sanitizeCSV(r.vendor),
+          r.total,
+          r.tax,
+          r.subtotal,
+          sanitizeCSV(r.category),
+          sanitizeCSV(r.source),
+          sanitizeCSV(r.notes),
+          sanitizeCSV(r.image_url),
+          r.reconciled,
+        ].join(",")
+      );
 
       const csv = [headers.join(","), ...rows].join("\n");
       downloadCSV(csv, `kosmos_receipts_${formatDateForFilename()}.csv`);
 
-      toast({ title: "Receipts exported successfully" });
+      toast({ title: `Receipts exported (${rows.length})` });
     } catch (error: any) {
       toast({
         title: "Export failed",
@@ -99,65 +127,174 @@ const ExportSection = ({ orgId, fromDate, toDate }: ExportSectionProps) => {
     }
   };
 
+  // ✅ MAIN FIX: Export a full ledger:
+  // - all transactions
+  // - plus matched receipt details on each transaction row
+  // - plus cash receipts as extra rows
   const exportTransactions = async () => {
     try {
-      let query = supabase
-        .from("transactions")
-        .select("*")
-        .eq("org_id", orgId)
-        .order("txn_date", { ascending: false });
+      const from = fromDate ? format(fromDate, "yyyy-MM-dd") : null;
+      const to = toDate ? format(toDate, "yyyy-MM-dd") : null;
 
-      if (fromDate) {
-        query = query.gte("txn_date", format(fromDate, "yyyy-MM-dd"));
+      // 1) Pull ALL transactions in range
+      const txns = await fetchAll<any>(async (rangeFrom, rangeTo) => {
+        let query = supabase
+          .from("transactions")
+          .select("*")
+          .eq("org_id", orgId)
+          .order("txn_date", { ascending: true })
+          .range(rangeFrom, rangeTo);
+
+        if (from) query = query.gte("txn_date", from);
+        if (to) query = query.lte("txn_date", to);
+
+        return await query;
+      });
+
+      // 2) Pull matches (for this org) and map txn->receipt
+      const matches = await fetchAll<any>(async (rangeFrom, rangeTo) => {
+        const query = supabase
+          .from("matches")
+          .select("transaction_id,receipt_id")
+          .eq("org_id", orgId)
+          .range(rangeFrom, rangeTo);
+        return await query;
+      });
+
+      const txnToReceipt = new Map<string, string>();
+      const receiptIds: string[] = [];
+      for (const m of matches || []) {
+        if (m?.transaction_id && m?.receipt_id) {
+          txnToReceipt.set(m.transaction_id, m.receipt_id);
+          receiptIds.push(m.receipt_id);
+        }
       }
-      if (toDate) {
-        query = query.lte("txn_date", format(toDate, "yyyy-MM-dd"));
+
+      // 3) Pull receipts for those matched ids (batched)
+      const uniqueReceiptIds = Array.from(new Set(receiptIds));
+      let receipts: any[] = [];
+
+      if (uniqueReceiptIds.length > 0) {
+        // .in() also has practical limits, chunk it
+        const chunkSize = 500;
+        for (let i = 0; i < uniqueReceiptIds.length; i += chunkSize) {
+          const chunk = uniqueReceiptIds.slice(i, i + chunkSize);
+          const { data, error } = await supabase
+            .from("receipts")
+            .select("*")
+            .eq("org_id", orgId)
+            .in("id", chunk);
+          if (error) throw error;
+          receipts.push(...(data || []));
+        }
       }
 
-      const { data, error } = await query;
+      const receiptsMap = new Map(receipts.map((r: any) => [r.id, r]));
 
-      if (error) throw error;
+      // 4) Pull ALL receipts in range so we can append CASH ones (even if no match row)
+      const allReceiptsInRange = await fetchAll<any>(async (rangeFrom, rangeTo) => {
+        let query = supabase
+          .from("receipts")
+          .select("*")
+          .eq("org_id", orgId)
+          .order("receipt_date", { ascending: true })
+          .range(rangeFrom, rangeTo);
 
+        if (from) query = query.gte("receipt_date", from);
+        if (to) query = query.lte("receipt_date", to);
+
+        return await query;
+      });
+
+      const cashReceipts = (allReceiptsInRange || []).filter((r: any) => isCashReceipt(r));
+
+      // 5) Build rows:
+      // - transaction rows get receipt columns if matched
+      // - cash receipts become extra rows (entry_type=cash_receipt)
       const headers = [
-        "transaction_id",
-        "txn_date",
-        "post_date",
+        "entry_type",                 // bank_cc | cash_receipt
+        "date",
         "description",
-        "vendor_clean",
-        "amount",
+        "vendor",
+        "amount_signed",              // credits +, debits -
         "direction",
         "category",
-        "source_account_name",
-        "institution",
-        "imported_via",
-        "csv_row",
-        "external_id"
+        "source",
+        "transaction_id",
+        "receipt_id",
+        // receipt details if matched (or cash)
+        "receipt_date",
+        "receipt_vendor",
+        "receipt_total",
+        "receipt_tax",
+        "receipt_subtotal",
+        "receipt_category",
+        "receipt_source",
+        "receipt_image_url",
       ];
 
-      // Credits positive, debits negative for Excel pivot tables
-      const rows = (data || []).map((t: any) => {
-        const signedAmount = t.direction === "credit" ? t.amount : -t.amount;
+      const txnRows = (txns || []).map((t: any) => {
+        const signedAmount = t.direction === "credit" ? Number(t.amount ?? 0) : -Number(t.amount ?? 0);
+
+        const rid = txnToReceipt.get(t.id);
+        const r = rid ? receiptsMap.get(rid) : null;
+
         return [
-          sanitizeCSV(t.id),
+          sanitizeCSV("bank_cc"),
           sanitizeCSV(t.txn_date),
-          sanitizeCSV(t.post_date),
           sanitizeCSV(t.description),
           sanitizeCSV(t.vendor_clean),
           signedAmount,
           sanitizeCSV(t.direction),
           sanitizeCSV(t.category),
-          sanitizeCSV(t.source_account_name),
-          sanitizeCSV(t.institution),
-          sanitizeCSV(t.imported_via),
-          t.csv_row || "",
-          sanitizeCSV(t.external_id)
+          sanitizeCSV(t.source_account_name || t.institution),
+          sanitizeCSV(t.id),
+          sanitizeCSV(rid || ""),
+          // receipt columns
+          sanitizeCSV(r?.receipt_date || ""),
+          sanitizeCSV(r?.vendor || ""),
+          r?.total ?? "",
+          r?.tax ?? "",
+          r?.subtotal ?? "",
+          sanitizeCSV(r?.category || ""),
+          sanitizeCSV(r?.source || ""),
+          sanitizeCSV(r?.image_url || ""),
         ].join(",");
       });
 
-      const csv = [headers.join(","), ...rows].join("\n");
-      downloadCSV(csv, `kosmos_transactions_${formatDateForFilename()}.csv`);
+      // Cash receipts as “transactions”
+      const cashRows = cashReceipts.map((r: any) => {
+        const total = Number(r.total ?? 0);
 
-      toast({ title: "Transactions exported successfully" });
+        return [
+          sanitizeCSV("cash_receipt"),
+          sanitizeCSV(r.receipt_date),
+          sanitizeCSV(r.vendor || "Cash Receipt"),
+          sanitizeCSV(r.vendor || ""),
+          total, // cash sales = money IN
+          sanitizeCSV("credit"),
+          sanitizeCSV(r.category || "Sales Income"),
+          sanitizeCSV(r.source || "Cash"),
+          sanitizeCSV(""),
+          sanitizeCSV(r.id),
+          sanitizeCSV(r.receipt_date || ""),
+          sanitizeCSV(r.vendor || ""),
+          r.total ?? "",
+          r.tax ?? "",
+          r.subtotal ?? "",
+          sanitizeCSV(r.category || ""),
+          sanitizeCSV(r.source || ""),
+          sanitizeCSV(r.image_url || ""),
+        ].join(",");
+      });
+
+      const csv = [headers.join(","), ...txnRows, ...cashRows].join("\n");
+      downloadCSV(csv, `kosmos_ledger_${formatDateForFilename()}.csv`);
+
+      toast({
+        title: "Ledger exported",
+        description: `Exported ${txnRows.length} transactions + ${cashRows.length} cash receipts.`,
+      });
     } catch (error: any) {
       toast({
         title: "Export failed",
@@ -169,62 +306,69 @@ const ExportSection = ({ orgId, fromDate, toDate }: ExportSectionProps) => {
 
   const exportMatchedPairs = async () => {
     try {
-      let matchesQuery = supabase
-        .from("matches")
-        .select(`
-          id,
-          created_at,
-          method,
-          match_type,
-          confidence,
-          matched_amount,
-          transaction_id,
-          receipt_id
-        `)
-        .eq("org_id", orgId);
+      const matchesData = await fetchAll<any>(async (rangeFrom, rangeTo) => {
+        const q = supabase
+          .from("matches")
+          .select(`
+            id,
+            created_at,
+            method,
+            match_type,
+            confidence,
+            matched_amount,
+            transaction_id,
+            receipt_id
+          `)
+          .eq("org_id", orgId)
+          .range(rangeFrom, rangeTo);
 
-      const { data: matchesData, error: matchesError } = await matchesQuery;
+        return await q;
+      });
 
-      if (matchesError) throw matchesError;
+      const transactionIds = matchesData?.map((m: any) => m.transaction_id) || [];
+      const receiptIds = matchesData?.map((m: any) => m.receipt_id) || [];
 
-      // Fetch all transaction and receipt IDs
-      const transactionIds = matchesData?.map(m => m.transaction_id) || [];
-      const receiptIds = matchesData?.map(m => m.receipt_id) || [];
+      const from = fromDate ? format(fromDate, "yyyy-MM-dd") : null;
+      const to = toDate ? format(toDate, "yyyy-MM-dd") : null;
 
       let transactionsData: any[] = [];
       let receiptsData: any[] = [];
 
       if (transactionIds.length > 0) {
-        let txnQuery = supabase
-          .from("transactions")
-          .select("*")
-          .in("id", transactionIds);
+        const uniqueTxnIds = Array.from(new Set(transactionIds));
+        const chunkSize = 500;
+        for (let i = 0; i < uniqueTxnIds.length; i += chunkSize) {
+          const chunk = uniqueTxnIds.slice(i, i + chunkSize);
 
-        if (fromDate) {
-          txnQuery = txnQuery.gte("txn_date", format(fromDate, "yyyy-MM-dd"));
-        }
-        if (toDate) {
-          txnQuery = txnQuery.lte("txn_date", format(toDate, "yyyy-MM-dd"));
-        }
+          let q = supabase.from("transactions").select("*").in("id", chunk).eq("org_id", orgId);
+          if (from) q = q.gte("txn_date", from);
+          if (to) q = q.lte("txn_date", to);
 
-        const { data, error } = await txnQuery;
-        if (error) throw error;
-        transactionsData = data || [];
+          const { data, error } = await q;
+          if (error) throw error;
+          transactionsData.push(...(data || []));
+        }
       }
 
       if (receiptIds.length > 0) {
-        const { data, error } = await supabase
-          .from("receipts")
-          .select("*")
-          .in("id", receiptIds);
+        const uniqueReceiptIds = Array.from(new Set(receiptIds));
+        const chunkSize = 500;
+        for (let i = 0; i < uniqueReceiptIds.length; i += chunkSize) {
+          const chunk = uniqueReceiptIds.slice(i, i + chunkSize);
 
-        if (error) throw error;
-        receiptsData = data || [];
+          const { data, error } = await supabase
+            .from("receipts")
+            .select("*")
+            .in("id", chunk)
+            .eq("org_id", orgId);
+
+          if (error) throw error;
+          receiptsData.push(...(data || []));
+        }
       }
 
-      // Create maps for quick lookup
-      const transactionsMap = new Map(transactionsData.map(t => [t.id, t]));
-      const receiptsMap = new Map(receiptsData.map(r => [r.id, r]));
+      const transactionsMap = new Map(transactionsData.map((t) => [t.id, t]));
+      const receiptsMap = new Map(receiptsData.map((r) => [r.id, r]));
 
       const headers = [
         "match_id",
@@ -244,11 +388,11 @@ const ExportSection = ({ orgId, fromDate, toDate }: ExportSectionProps) => {
         "receipt_total",
         "receipt_tax",
         "receipt_category",
-        "receipt_image_url"
+        "receipt_image_url",
       ];
 
       const rows = (matchesData || [])
-        .filter(m => transactionsMap.has(m.transaction_id)) // Only include if transaction matches date filter
+        .filter((m: any) => transactionsMap.has(m.transaction_id))
         .map((m: any) => {
           const txn = transactionsMap.get(m.transaction_id);
           const receipt = receiptsMap.get(m.receipt_id);
@@ -271,14 +415,14 @@ const ExportSection = ({ orgId, fromDate, toDate }: ExportSectionProps) => {
             receipt?.total,
             receipt?.tax,
             sanitizeCSV(receipt?.category),
-            sanitizeCSV(receipt?.image_url)
+            sanitizeCSV(receipt?.image_url),
           ].join(",");
         });
 
       const csv = [headers.join(","), ...rows].join("\n");
       downloadCSV(csv, `kosmos_matched_pairs_${formatDateForFilename()}.csv`);
 
-      toast({ title: "Matched pairs exported successfully" });
+      toast({ title: `Matched pairs exported (${rows.length})` });
     } catch (error: any) {
       toast({
         title: "Export failed",
@@ -312,16 +456,16 @@ const ExportSection = ({ orgId, fromDate, toDate }: ExportSectionProps) => {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5" />
-            Transactions
+            Export (FULL) Ledger
           </CardTitle>
           <CardDescription>
-            Export all transactions with signed amounts (credits +, debits -)
+            Full export: bank/cc transactions + matched receipt details + cash receipts
           </CardDescription>
         </CardHeader>
         <CardContent>
           <Button onClick={exportTransactions} className="w-full">
             <Download className="mr-2 h-4 w-4" />
-            Export Transactions CSV
+            Export Ledger CSV
           </Button>
         </CardContent>
       </Card>
