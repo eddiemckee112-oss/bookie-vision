@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { UserPlus, Trash2, Copy, RefreshCw, XCircle } from "lucide-react";
+import { UserPlus, Trash2, Copy, XCircle } from "lucide-react";
 import { emailSchema } from "@/lib/validations";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -36,7 +36,7 @@ const Team = () => {
   const { currentOrg, loading: orgLoading, orgRole, user } = useOrg();
   const navigate = useNavigate();
   const { toast } = useToast();
-  
+
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [invites, setInvites] = useState<PendingInvite[]>([]);
   const [inviteEmail, setInviteEmail] = useState("");
@@ -54,7 +54,7 @@ const Team = () => {
       navigate("/onboard");
       return;
     }
-    
+
     fetchMembers();
     fetchInvites();
   }, [currentOrg, orgLoading, navigate]);
@@ -62,12 +62,14 @@ const Team = () => {
   const fetchMembers = async () => {
     if (!currentOrg) return;
 
+    // ✅ Pull email directly from org_users (after the SQL backfill + trigger)
     const { data, error } = await supabase
       .from("org_users")
       .select(`
         id,
         user_id,
         role,
+        email,
         created_at
       `)
       .eq("org_id", currentOrg.id)
@@ -82,37 +84,13 @@ const Team = () => {
       return;
     }
 
-    // Fetch user emails from profiles table (secure, RLS-protected)
-    const userIds = data?.map(m => m.user_id) || [];
-    if (userIds.length === 0) {
-      setMembers([]);
-      return;
-    }
-
-    // Get user emails from profiles table with proper RLS
-    const { data: profiles, error: profilesError } = await supabase
-      .from('profiles')
-      .select('id, email')
-      .in('id', userIds);
-
-    if (profilesError) {
-      console.error("Error fetching profiles:", profilesError);
-    }
-
-    const emailMap = new Map<string, string>();
-    (profiles || []).forEach(p => {
-      if (p.id && p.email) {
-        emailMap.set(p.id, p.email);
-      }
-    });
-
     setMembers(
       (data || []).map((m: any) => ({
         id: m.id,
         user_id: m.user_id,
         role: m.role,
         created_at: m.created_at,
-        email: emailMap.get(m.user_id) || "Unknown",
+        email: m.email || "Unknown",
       }))
     );
   };
@@ -187,7 +165,16 @@ const Team = () => {
     }
   };
 
-  const copyInviteLink = (token: string) => {
+  const copyInviteLink = (token: string | null) => {
+    if (!token) {
+      toast({
+        title: "No token found",
+        description: "This invite is missing a token.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const link = `${window.location.origin}/accept-invite?token=${token}`;
     navigator.clipboard.writeText(link);
     toast({
@@ -218,8 +205,6 @@ const Team = () => {
   const updateMemberRole = async (memberId: string, memberUserId: string, newRole: "admin" | "staff") => {
     if (!canManage) return;
 
-    // Owners can change anyone except themselves
-    // Admins can only change staff/admin (not owners)
     const member = members.find(m => m.id === memberId);
     if (!member) return;
 
