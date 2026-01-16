@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Kosmos</title>
+    <script>
+      // Redirect all 404s to index.html while keeping the path in the hash
+      var path = window.location.pathname;
+      var search = window.location.search || "";
+      var hash = window.location.hash || "";
+      window.location.replace(
+        window.location.origin +
+          (window.location.pathname.split("/")[1] ? "/" + window.location.pathname.split("/")[1] : "") +
+          "/#/" +
+          path.replace(/^\//, "") +
+          search +
+          hash
+      );
+    </script>
+  </head>
+  <body></body>
+</html>
