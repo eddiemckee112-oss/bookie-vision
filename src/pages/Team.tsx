@@ -122,17 +122,23 @@ const Team = () => {
 
       const { data, error } = await supabase
         .from("org_invites")
-        .insert({
-          org_id: currentOrg.id,
-          email: validatedEmail,
-          role: inviteRole,
-          invited_by: user?.id,
-          status: "pending",
-        })
-        .select()
+        .insert([
+          {
+            org_id: currentOrg.id,
+            email: validatedEmail,
+            role: inviteRole as any, // ✅ enum-safe against stale client schema
+            invited_by: user?.id,
+            status: "pending",
+          },
+        ])
+        .select("id, email, role, status, token, created_at")
         .single();
 
       if (error) throw error;
+
+      if (!data?.token) {
+        throw new Error("Invite created but token was not returned. Refresh and try again.");
+      }
 
       const link = `${window.location.origin}/accept-invite?token=${data.token}`;
       setInviteLink(link);
