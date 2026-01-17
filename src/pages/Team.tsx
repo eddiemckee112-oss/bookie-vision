@@ -1,19 +1,45 @@
+// src/pages/Team.tsx
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useOrg } from "@/contexts/OrgContext";
 import Layout from "@/components/Layout";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { UserPlus, Trash2, Copy, XCircle } from "lucide-react";
 import { emailSchema } from "@/lib/validations";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface TeamMember {
   id: string;
@@ -43,7 +69,7 @@ const Team = () => {
   const [inviteRole, setInviteRole] = useState<"staff" | "admin">("staff");
   const [inviteLoading, setInviteLoading] = useState(false);
 
-  // kept as fallback only
+  // fallback link dialog (kept OFF by default)
   const [showInviteLink, setShowInviteLink] = useState(false);
   const [inviteLink, setInviteLink] = useState("");
 
@@ -52,6 +78,7 @@ const Team = () => {
 
   useEffect(() => {
     if (orgLoading) return;
+
     if (!currentOrg) {
       navigate("/onboard");
       return;
@@ -121,6 +148,7 @@ const Team = () => {
     if (!currentOrg || !canManage) return;
 
     setInviteLoading(true);
+
     try {
       const validatedEmail = emailSchema.parse(inviteEmail);
 
@@ -135,8 +163,7 @@ const Team = () => {
       });
 
       if (error) {
-        // Supabase Functions often return a generic "non-2xx" here — show message
-        throw new Error(error.message || "Edge Function failed");
+        throw new Error(error.message || "Edge Function returned a non-2xx status");
       }
 
       if (!data?.success) {
@@ -148,11 +175,9 @@ const Team = () => {
         description: `Invite email sent to ${validatedEmail}`,
       });
 
-      // Optional fallback link for YOU only (not required)
+      // Optional: keep a fallback link for YOU (not shown by default)
       if (data?.invite_token) {
-        const fallback = `${window.location.origin}/#/accept-invite?token=${data.invite_token}`;
-        setInviteLink(fallback);
-        // keep dialog OFF unless you want it:
+        setInviteLink(`${window.location.origin}/#/accept-invite?token=${data.invite_token}`);
         setShowInviteLink(false);
       } else {
         setInviteLink("");
@@ -165,7 +190,7 @@ const Team = () => {
     } catch (err: any) {
       toast({
         title: "Invite failed",
-        description: err.message || "Failed to send invite",
+        description: err?.message || "Failed to send invite",
         variant: "destructive",
       });
     } finally {
@@ -192,7 +217,10 @@ const Team = () => {
   };
 
   const revokeInvite = async (inviteId: string) => {
-    const { error } = await supabase.from("org_invites").update({ status: "revoked" }).eq("id", inviteId);
+    const { error } = await supabase
+      .from("org_invites")
+      .update({ status: "revoked" })
+      .eq("id", inviteId);
 
     if (error) {
       toast({
@@ -207,7 +235,11 @@ const Team = () => {
     fetchInvites();
   };
 
-  const updateMemberRole = async (memberId: string, memberUserId: string, newRole: "admin" | "staff") => {
+  const updateMemberRole = async (
+    memberId: string,
+    memberUserId: string,
+    newRole: "admin" | "staff"
+  ) => {
     if (!canManage) return;
 
     const member = members.find((m) => m.id === memberId);
@@ -269,7 +301,11 @@ const Team = () => {
       return;
     }
 
-    const { error } = await supabase.from("org_users").delete().eq("id", memberId).eq("org_id", currentOrg?.id);
+    const { error } = await supabase
+      .from("org_users")
+      .delete()
+      .eq("id", memberId)
+      .eq("org_id", currentOrg?.id);
 
     if (error) {
       toast({
@@ -299,9 +335,12 @@ const Team = () => {
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold">Team Management</h1>
-          <p className="text-muted-foreground">Manage members and invitations for {currentOrg?.name}</p>
+          <p className="text-muted-foreground">
+            Manage members and invitations for {currentOrg?.name}
+          </p>
         </div>
 
+        {/* Team Members */}
         <Card>
           <CardHeader>
             <CardTitle>Team Members</CardTitle>
@@ -327,7 +366,9 @@ const Team = () => {
                       {canManage && member.user_id !== user?.id && member.role !== "owner" ? (
                         <Select
                           value={member.role}
-                          onValueChange={(value) => updateMemberRole(member.id, member.user_id, value as "admin" | "staff")}
+                          onValueChange={(value) =>
+                            updateMemberRole(member.id, member.user_id, value as "admin" | "staff")
+                          }
                         >
                           <SelectTrigger className="w-32">
                             <SelectValue />
@@ -338,14 +379,20 @@ const Team = () => {
                           </SelectContent>
                         </Select>
                       ) : (
-                        <Badge variant={member.role === "owner" ? "default" : "secondary"}>{member.role}</Badge>
+                        <Badge variant={member.role === "owner" ? "default" : "secondary"}>
+                          {member.role}
+                        </Badge>
                       )}
                     </TableCell>
                     <TableCell>{new Date(member.created_at).toLocaleDateString()}</TableCell>
                     {canManage && (
                       <TableCell className="text-right">
                         {isOwner && member.role !== "owner" && member.user_id !== user?.id && (
-                          <Button variant="ghost" size="icon" onClick={() => removeMember(member.id, member.user_id)}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => removeMember(member.id, member.user_id)}
+                          >
                             <Trash2 className="h-4 w-4 text-destructive" />
                           </Button>
                         )}
@@ -358,6 +405,7 @@ const Team = () => {
           </CardContent>
         </Card>
 
+        {/* Pending Invites */}
         <Card>
           <CardHeader>
             <CardTitle>Pending Invites</CardTitle>
@@ -387,7 +435,11 @@ const Team = () => {
                       <TableCell>
                         <Badge
                           variant={
-                            invite.status === "pending" ? "default" : invite.status === "accepted" ? "secondary" : "destructive"
+                            invite.status === "pending"
+                              ? "default"
+                              : invite.status === "accepted"
+                              ? "secondary"
+                              : "destructive"
                           }
                         >
                           {invite.status}
@@ -407,7 +459,12 @@ const Team = () => {
                                 >
                                   <Copy className="h-4 w-4" />
                                 </Button>
-                                <Button variant="ghost" size="icon" onClick={() => revokeInvite(invite.id)} title="Revoke invite">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => revokeInvite(invite.id)}
+                                  title="Revoke invite"
+                                >
                                   <XCircle className="h-4 w-4 text-destructive" />
                                 </Button>
                               </>
@@ -423,6 +480,7 @@ const Team = () => {
           </CardContent>
         </Card>
 
+        {/* Invite Form */}
         {canManage && (
           <Card>
             <CardHeader>
@@ -445,7 +503,10 @@ const Team = () => {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="role">Role</Label>
-                    <Select value={inviteRole} onValueChange={(value: "staff" | "admin") => setInviteRole(value)}>
+                    <Select
+                      value={inviteRole}
+                      onValueChange={(value: "staff" | "admin") => setInviteRole(value)}
+                    >
                       <SelectTrigger id="role">
                         <SelectValue />
                       </SelectTrigger>
@@ -465,11 +526,14 @@ const Team = () => {
           </Card>
         )}
 
+        {/* Fallback Link Dialog (OFF by default) */}
         <Dialog open={showInviteLink} onOpenChange={setShowInviteLink}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Invitation Link Created</DialogTitle>
-              <DialogDescription>Backup link (only if needed). Normally invites are sent by email now.</DialogDescription>
+              <DialogTitle>Invitation Link (Fallback)</DialogTitle>
+              <DialogDescription>
+                Normally invites are sent by email. This is only a backup link.
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="p-3 bg-muted rounded-md break-all text-sm">{inviteLink}</div>
