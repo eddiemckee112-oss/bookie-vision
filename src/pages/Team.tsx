@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { UserPlus, Trash2, Copy, XCircle } from "lucide-react";
 import { emailSchema } from "@/lib/validations";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface TeamMember {
   id: string;
@@ -42,11 +43,15 @@ const Team = () => {
   const [inviteRole, setInviteRole] = useState<"staff" | "admin">("staff");
   const [inviteLoading, setInviteLoading] = useState(false);
 
+  // fallback dialog (optional)
+  const [showInviteLink, setShowInviteLink] = useState(false);
+  const [inviteLink, setInviteLink] = useState("");
+
   const canManage = orgRole === "owner" || orgRole === "admin";
   const isOwner = orgRole === "owner";
 
-  // IMPORTANT: GitHub Pages needs the BASE_URL path ("/bookie-vision/") included.
-  const appBaseUrl = `${window.location.origin}${import.meta.env.BASE_URL}`.replace(/\/$/, "");
+  // IMPORTANT: GitHub Pages base for this app
+  const APP_BASE_URL = `${window.location.origin}/bookie-vision`;
 
   useEffect(() => {
     if (orgLoading) return;
@@ -54,7 +59,6 @@ const Team = () => {
       navigate("/onboard");
       return;
     }
-
     fetchMembers();
     fetchInvites();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -65,7 +69,7 @@ const Team = () => {
 
     const { data, error } = await supabase
       .from("org_users")
-      .select("id, user_id, role, email, created_at")
+      .select(`id, user_id, role, email, created_at`)
       .eq("org_id", currentOrg.id)
       .order("created_at", { ascending: true });
 
@@ -116,11 +120,12 @@ const Team = () => {
 
       const { data, error } = await supabase.functions.invoke("send-org-invite", {
         body: {
-          orgId: currentOrg.id, // MUST be orgId (camelCase) to match function
+          orgId: currentOrg.id,
           email: validatedEmail,
           role: inviteRole,
           invitedBy: user?.id ?? null,
-          origin: appBaseUrl, // MUST include /bookie-vision
+          // ✅ THIS is the correct base for GitHub Pages app
+          origin: APP_BASE_URL,
         },
       });
 
@@ -131,6 +136,15 @@ const Team = () => {
         title: "Invite sent!",
         description: `Invite email sent to ${validatedEmail}`,
       });
+
+      // Optional: store fallback link if you want it
+      if (data?.invite_token) {
+        setInviteLink(`${APP_BASE_URL}/#/accept-invite?token=${data.invite_token}`);
+        setShowInviteLink(false);
+      } else {
+        setInviteLink("");
+        setShowInviteLink(false);
+      }
 
       setInviteEmail("");
       setInviteRole("staff");
@@ -156,24 +170,16 @@ const Team = () => {
       return;
     }
 
-    // HashRouter link for GitHub pages:
-    const link = `${appBaseUrl}/#/accept-invite?token=${token}`;
+    const link = `${APP_BASE_URL}/#/accept-invite?token=${token}`;
     navigator.clipboard.writeText(link);
-    toast({
-      title: "Link copied!",
-      description: "Invite link copied to clipboard",
-    });
+    toast({ title: "Link copied!", description: "Invite link copied to clipboard" });
   };
 
   const revokeInvite = async (inviteId: string) => {
     const { error } = await supabase.from("org_invites").update({ status: "revoked" }).eq("id", inviteId);
 
     if (error) {
-      toast({
-        title: "Error",
-        description: "Failed to revoke invite",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: "Failed to revoke invite", variant: "destructive" });
       return;
     }
 
@@ -188,31 +194,23 @@ const Team = () => {
     if (!member) return;
 
     if (member.user_id === user?.id) {
-      toast({
-        title: "Cannot modify yourself",
-        description: "You cannot change your own role",
-        variant: "destructive",
-      });
+      toast({ title: "Cannot modify yourself", description: "You cannot change your own role", variant: "destructive" });
       return;
     }
 
     if (!isOwner && member.role === "owner") {
-      toast({
-        title: "Permission denied",
-        description: "Only owners can modify owner roles",
-        variant: "destructive",
-      });
+      toast({ title: "Permission denied", description: "Only owners can modify owner roles", variant: "destructive" });
       return;
     }
 
-    const { error } = await supabase.from("org_users").update({ role: newRole }).eq("id", memberId).eq("org_id", currentOrg?.id);
+    const { error } = await supabase
+      .from("org_users")
+      .update({ role: newRole })
+      .eq("id", memberId)
+      .eq("org_id", currentOrg?.id);
 
     if (error) {
-      toast({
-        title: "Error",
-        description: "Failed to update role",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: "Failed to update role", variant: "destructive" });
       return;
     }
 
@@ -222,31 +220,19 @@ const Team = () => {
 
   const removeMember = async (memberId: string, memberUserId: string) => {
     if (!isOwner) {
-      toast({
-        title: "Permission denied",
-        description: "Only owners can remove members",
-        variant: "destructive",
-      });
+      toast({ title: "Permission denied", description: "Only owners can remove members", variant: "destructive" });
       return;
     }
 
     if (memberUserId === user?.id) {
-      toast({
-        title: "Cannot remove yourself",
-        description: "You cannot remove yourself from the organization",
-        variant: "destructive",
-      });
+      toast({ title: "Cannot remove yourself", description: "You cannot remove yourself from the organization", variant: "destructive" });
       return;
     }
 
     const { error } = await supabase.from("org_users").delete().eq("id", memberId).eq("org_id", currentOrg?.id);
 
     if (error) {
-      toast({
-        title: "Error",
-        description: "Failed to remove member",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: "Failed to remove member", variant: "destructive" });
       return;
     }
 
@@ -272,7 +258,6 @@ const Team = () => {
           <p className="text-muted-foreground">Manage members and invitations for {currentOrg?.name}</p>
         </div>
 
-        {/* Team Members */}
         <Card>
           <CardHeader>
             <CardTitle>Team Members</CardTitle>
@@ -329,7 +314,6 @@ const Team = () => {
           </CardContent>
         </Card>
 
-        {/* Pending Invites */}
         <Card>
           <CardHeader>
             <CardTitle>Pending Invites</CardTitle>
@@ -337,7 +321,7 @@ const Team = () => {
           </CardHeader>
           <CardContent>
             {invites.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No invites</p>
+              <p className="text-sm text-muted-foreground">No pending invites</p>
             ) : (
               <Table>
                 <TableHeader>
@@ -359,30 +343,27 @@ const Team = () => {
                       <TableCell>
                         <Badge
                           variant={
-                            invite.status === "pending"
-                              ? "default"
-                              : invite.status === "accepted"
-                              ? "secondary"
-                              : "destructive"
+                            invite.status === "pending" ? "default" : invite.status === "accepted" ? "secondary" : "destructive"
                           }
                         >
                           {invite.status}
                         </Badge>
                       </TableCell>
                       <TableCell>{new Date(invite.created_at).toLocaleDateString()}</TableCell>
-
                       {canManage && (
                         <TableCell className="text-right">
-                          {invite.status === "pending" && (
-                            <div className="flex justify-end gap-2">
-                              <Button variant="ghost" size="icon" onClick={() => copyInviteLink(invite.token)} title="Copy fallback link">
-                                <Copy className="h-4 w-4" />
-                              </Button>
-                              <Button variant="ghost" size="icon" onClick={() => revokeInvite(invite.id)} title="Revoke invite">
-                                <XCircle className="h-4 w-4 text-destructive" />
-                              </Button>
-                            </div>
-                          )}
+                          <div className="flex justify-end gap-2">
+                            {invite.status === "pending" && (
+                              <>
+                                <Button variant="ghost" size="icon" onClick={() => copyInviteLink(invite.token)} title="Copy invite link (fallback)">
+                                  <Copy className="h-4 w-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" onClick={() => revokeInvite(invite.id)} title="Revoke invite">
+                                  <XCircle className="h-4 w-4 text-destructive" />
+                                </Button>
+                              </>
+                            )}
+                          </div>
                         </TableCell>
                       )}
                     </TableRow>
@@ -393,7 +374,6 @@ const Team = () => {
           </CardContent>
         </Card>
 
-        {/* Invite Form */}
         {canManage && (
           <Card>
             <CardHeader>
@@ -427,7 +407,6 @@ const Team = () => {
                     </Select>
                   </div>
                 </div>
-
                 <Button type="submit" disabled={inviteLoading}>
                   <UserPlus className="mr-2 h-4 w-4" />
                   {inviteLoading ? "Sending invite..." : "Send Email Invite"}
@@ -436,6 +415,28 @@ const Team = () => {
             </CardContent>
           </Card>
         )}
+
+        <Dialog open={showInviteLink} onOpenChange={setShowInviteLink}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Invitation Link Created</DialogTitle>
+              <DialogDescription>Backup link (only if needed). Normally invites are sent by email now.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="p-3 bg-muted rounded-md break-all text-sm">{inviteLink}</div>
+              <Button
+                onClick={() => {
+                  navigator.clipboard.writeText(inviteLink);
+                  toast({ title: "Copied!", description: "Invite link copied to clipboard" });
+                }}
+                className="w-full"
+              >
+                <Copy className="mr-2 h-4 w-4" />
+                Copy to Clipboard
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </Layout>
   );
