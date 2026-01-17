@@ -42,6 +42,8 @@ const Team = () => {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"staff" | "admin">("staff");
   const [inviteLoading, setInviteLoading] = useState(false);
+
+  // kept (but we won’t force showing the link anymore)
   const [showInviteLink, setShowInviteLink] = useState(false);
   const [inviteLink, setInviteLink] = useState("");
 
@@ -65,13 +67,15 @@ const Team = () => {
     // ✅ Pull email directly from org_users (after the SQL backfill + trigger)
     const { data, error } = await supabase
       .from("org_users")
-      .select(`
+      .select(
+        `
         id,
         user_id,
         role,
         email,
         created_at
-      `)
+      `,
+      )
       .eq("org_id", currentOrg.id)
       .order("created_at", { ascending: true });
 
@@ -91,7 +95,7 @@ const Team = () => {
         role: m.role,
         created_at: m.created_at,
         email: m.email || "Unknown",
-      }))
+      })),
     );
   };
 
@@ -121,41 +125,50 @@ const Team = () => {
       const validatedEmail = emailSchema.parse(inviteEmail);
 
       // ✅ Call Edge Function that:
-      // 1) creates org_invites row (token)
+      // 1) inserts org_invites (token default)
       // 2) sends Supabase Auth invite email
       const { data, error } = await supabase.functions.invoke("send-org-invite", {
         body: {
           orgId: currentOrg.id,
           email: validatedEmail,
           role: inviteRole,
+          invitedBy: user?.id ?? null,
+          origin: window.location.origin,
         },
       });
 
       if (error) throw error;
-      if (!data?.success) throw new Error(data?.error || "Invite failed");
-
-      // Still show link (nice fallback), BUT email was sent
-      const link =
-        data?.redirectTo ||
-        `${window.location.origin}/accept-invite?token=${data?.invite?.token}`;
-
-      setInviteLink(link);
-      setShowInviteLink(true);
+      if (!data?.success) {
+        throw new Error(data?.error || "Failed to send invite email");
+      }
 
       toast({
-        title: "Invite email sent!",
-        description: `Invitation emailed to ${validatedEmail}`,
+        title: "Invite sent!",
+        description: `Supabase emailed an invite to ${validatedEmail}`,
       });
+
+      // Optional: if you still want a backup link for YOU only, you can keep it:
+      // (but you said you don’t want to send links, so we keep dialog OFF by default)
+      setInviteLink("");
+      setShowInviteLink(false);
 
       setInviteEmail("");
       setInviteRole("staff");
       fetchInvites();
     } catch (error: any) {
-      toast({
-        title: "Invite failed",
-        description: error.message || "Failed to create invitation",
-        variant: "destructive",
-      });
+      if (error.name === "ZodError") {
+        toast({
+          title: "Invalid Email",
+          description: error.errors[0]?.message || "Please enter a valid email address",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Invite failed",
+          description: error.message || "Failed to create invitation",
+          variant: "destructive",
+        });
+      }
     } finally {
       setInviteLoading(false);
     }
@@ -180,10 +193,7 @@ const Team = () => {
   };
 
   const revokeInvite = async (inviteId: string) => {
-    const { error } = await supabase
-      .from("org_invites")
-      .update({ status: "revoked" })
-      .eq("id", inviteId);
+    const { error } = await supabase.from("org_invites").update({ status: "revoked" }).eq("id", inviteId);
 
     if (error) {
       toast({
@@ -201,7 +211,7 @@ const Team = () => {
   const updateMemberRole = async (memberId: string, memberUserId: string, newRole: "admin" | "staff") => {
     if (!canManage) return;
 
-    const member = members.find(m => m.id === memberId);
+    const member = members.find((m) => m.id === memberId);
     if (!member) return;
 
     if (member.user_id === user?.id) {
@@ -260,11 +270,7 @@ const Team = () => {
       return;
     }
 
-    const { error } = await supabase
-      .from("org_users")
-      .delete()
-      .eq("id", memberId)
-      .eq("org_id", currentOrg?.id);
+    const { error } = await supabase.from("org_users").delete().eq("id", memberId).eq("org_id", currentOrg?.id);
 
     if (error) {
       toast({
@@ -323,9 +329,7 @@ const Team = () => {
                       {canManage && member.user_id !== user?.id && member.role !== "owner" ? (
                         <Select
                           value={member.role}
-                          onValueChange={(value) =>
-                            updateMemberRole(member.id, member.user_id, value as "admin" | "staff")
-                          }
+                          onValueChange={(value) => updateMemberRole(member.id, member.user_id, value as "admin" | "staff")}
                         >
                           <SelectTrigger className="w-32">
                             <SelectValue />
@@ -336,20 +340,14 @@ const Team = () => {
                           </SelectContent>
                         </Select>
                       ) : (
-                        <Badge variant={member.role === "owner" ? "default" : "secondary"}>
-                          {member.role}
-                        </Badge>
+                        <Badge variant={member.role === "owner" ? "default" : "secondary"}>{member.role}</Badge>
                       )}
                     </TableCell>
                     <TableCell>{new Date(member.created_at).toLocaleDateString()}</TableCell>
                     {canManage && (
                       <TableCell className="text-right">
                         {isOwner && member.role !== "owner" && member.user_id !== user?.id && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => removeMember(member.id, member.user_id)}
-                          >
+                          <Button variant="ghost" size="icon" onClick={() => removeMember(member.id, member.user_id)}>
                             <Trash2 className="h-4 w-4 text-destructive" />
                           </Button>
                         )}
@@ -395,8 +393,8 @@ const Team = () => {
                             invite.status === "pending"
                               ? "default"
                               : invite.status === "accepted"
-                              ? "secondary"
-                              : "destructive"
+                                ? "secondary"
+                                : "destructive"
                           }
                         >
                           {invite.status}
@@ -408,11 +406,12 @@ const Team = () => {
                           <div className="flex justify-end gap-2">
                             {invite.status === "pending" && (
                               <>
+                                {/* optional fallback: copy link */}
                                 <Button
                                   variant="ghost"
                                   size="icon"
                                   onClick={() => copyInviteLink(invite.token)}
-                                  title="Copy invite link"
+                                  title="Copy invite link (fallback)"
                                 >
                                   <Copy className="h-4 w-4" />
                                 </Button>
@@ -473,26 +472,24 @@ const Team = () => {
                 </div>
                 <Button type="submit" disabled={inviteLoading}>
                   <UserPlus className="mr-2 h-4 w-4" />
-                  {inviteLoading ? "Creating invite..." : "Create Invite"}
+                  {inviteLoading ? "Sending invite..." : "Send Email Invite"}
                 </Button>
               </form>
             </CardContent>
           </Card>
         )}
 
-        {/* Invite Link Dialog */}
+        {/* Invite Link Dialog (kept but not used by default anymore) */}
         <Dialog open={showInviteLink} onOpenChange={setShowInviteLink}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Invitation Email Sent</DialogTitle>
+              <DialogTitle>Invitation Link Created</DialogTitle>
               <DialogDescription>
-                We emailed the invite. This link is just a backup you can copy if needed.
+                Backup link (only if needed). Normally invites are sent by email now.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
-              <div className="p-3 bg-muted rounded-md break-all text-sm">
-                {inviteLink}
-              </div>
+              <div className="p-3 bg-muted rounded-md break-all text-sm">{inviteLink}</div>
               <Button
                 onClick={() => {
                   navigator.clipboard.writeText(inviteLink);
@@ -501,7 +498,7 @@ const Team = () => {
                 className="w-full"
               >
                 <Copy className="mr-2 h-4 w-4" />
-                Copy Backup Link
+                Copy to Clipboard
               </Button>
             </div>
           </DialogContent>
