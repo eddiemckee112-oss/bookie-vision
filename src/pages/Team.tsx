@@ -43,7 +43,7 @@ const Team = () => {
   const [inviteRole, setInviteRole] = useState<"staff" | "admin">("staff");
   const [inviteLoading, setInviteLoading] = useState(false);
 
-  // Optional: keep a backup link dialog (OFF by default)
+  // kept as fallback only
   const [showInviteLink, setShowInviteLink] = useState(false);
   const [inviteLink, setInviteLink] = useState("");
 
@@ -56,9 +56,11 @@ const Team = () => {
       navigate("/onboard");
       return;
     }
+
     fetchMembers();
     fetchInvites();
-  }, [currentOrg, orgLoading, navigate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentOrg?.id, orgLoading]);
 
   const fetchMembers = async () => {
     if (!currentOrg) return;
@@ -72,7 +74,7 @@ const Team = () => {
         role,
         email,
         created_at
-      `,
+      `
       )
       .eq("org_id", currentOrg.id)
       .order("created_at", { ascending: true });
@@ -93,7 +95,7 @@ const Team = () => {
         role: m.role,
         created_at: m.created_at,
         email: m.email || "Unknown",
-      })),
+      }))
     );
   };
 
@@ -124,7 +126,7 @@ const Team = () => {
 
       const { data, error } = await supabase.functions.invoke("send-org-invite", {
         body: {
-          orgId: currentOrg.id, // ✅ camelCase
+          orgId: currentOrg.id,
           email: validatedEmail,
           role: inviteRole,
           invitedBy: user?.id ?? null,
@@ -133,23 +135,25 @@ const Team = () => {
       });
 
       if (error) {
-        // Edge function returned non-2xx
+        // Supabase Functions often return a generic "non-2xx" here — show message
         throw new Error(error.message || "Edge Function failed");
       }
 
       if (!data?.success) {
-        throw new Error(data?.error || data?.details || "Failed to send invite");
+        throw new Error(data?.error || data?.details || "Failed to send invite email");
       }
 
       toast({
         title: "Invite sent!",
-        description: `An email invite was sent to ${validatedEmail}`,
+        description: `Invite email sent to ${validatedEmail}`,
       });
 
-      // OPTIONAL backup link (we keep it OFF by default)
-      if (data?.redirect_to) {
-        setInviteLink(data.redirect_to);
-        setShowInviteLink(false); // you said you don’t want links; keep dialog closed
+      // Optional fallback link for YOU only (not required)
+      if (data?.invite_token) {
+        const fallback = `${window.location.origin}/#/accept-invite?token=${data.invite_token}`;
+        setInviteLink(fallback);
+        // keep dialog OFF unless you want it:
+        setShowInviteLink(false);
       } else {
         setInviteLink("");
         setShowInviteLink(false);
@@ -159,19 +163,11 @@ const Team = () => {
       setInviteRole("staff");
       fetchInvites();
     } catch (err: any) {
-      if (err?.name === "ZodError") {
-        toast({
-          title: "Invalid Email",
-          description: err.errors?.[0]?.message || "Please enter a valid email",
-          variant: "destructive",
-        });
-      } else {
-        toast({
-          title: "Invite failed",
-          description: err?.message || "Failed to send invite",
-          variant: "destructive",
-        });
-      }
+      toast({
+        title: "Invite failed",
+        description: err.message || "Failed to send invite",
+        variant: "destructive",
+      });
     } finally {
       setInviteLoading(false);
     }
@@ -187,11 +183,11 @@ const Team = () => {
       return;
     }
 
-    const link = `${window.location.origin}/accept-invite?token=${token}`;
+    const link = `${window.location.origin}/#/accept-invite?token=${token}`;
     navigator.clipboard.writeText(link);
     toast({
       title: "Link copied!",
-      description: "Invite link copied to clipboard (fallback).",
+      description: "Invite link copied to clipboard",
     });
   };
 
@@ -235,7 +231,11 @@ const Team = () => {
       return;
     }
 
-    const { error } = await supabase.from("org_users").update({ role: newRole }).eq("id", memberId).eq("org_id", currentOrg?.id);
+    const { error } = await supabase
+      .from("org_users")
+      .update({ role: newRole })
+      .eq("id", memberId)
+      .eq("org_id", currentOrg?.id);
 
     if (error) {
       toast({
@@ -325,7 +325,10 @@ const Team = () => {
                     <TableCell>{member.email}</TableCell>
                     <TableCell>
                       {canManage && member.user_id !== user?.id && member.role !== "owner" ? (
-                        <Select value={member.role} onValueChange={(value) => updateMemberRole(member.id, member.user_id, value as "admin" | "staff")}>
+                        <Select
+                          value={member.role}
+                          onValueChange={(value) => updateMemberRole(member.id, member.user_id, value as "admin" | "staff")}
+                        >
                           <SelectTrigger className="w-32">
                             <SelectValue />
                           </SelectTrigger>
@@ -384,11 +387,7 @@ const Team = () => {
                       <TableCell>
                         <Badge
                           variant={
-                            invite.status === "pending"
-                              ? "default"
-                              : invite.status === "accepted"
-                                ? "secondary"
-                                : "destructive"
+                            invite.status === "pending" ? "default" : invite.status === "accepted" ? "secondary" : "destructive"
                           }
                         >
                           {invite.status}
@@ -400,7 +399,12 @@ const Team = () => {
                           <div className="flex justify-end gap-2">
                             {invite.status === "pending" && (
                               <>
-                                <Button variant="ghost" size="icon" onClick={() => copyInviteLink(invite.token)} title="Copy invite link (fallback)">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => copyInviteLink(invite.token)}
+                                  title="Copy invite link (fallback)"
+                                >
                                   <Copy className="h-4 w-4" />
                                 </Button>
                                 <Button variant="ghost" size="icon" onClick={() => revokeInvite(invite.id)} title="Revoke invite">
@@ -423,7 +427,7 @@ const Team = () => {
           <Card>
             <CardHeader>
               <CardTitle>Invite New Member</CardTitle>
-              <CardDescription>Send an email invitation to join your organization</CardDescription>
+              <CardDescription>Send an invitation to join your organization</CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={sendInvite} className="space-y-4">
@@ -452,29 +456,27 @@ const Team = () => {
                     </Select>
                   </div>
                 </div>
-
                 <Button type="submit" disabled={inviteLoading}>
                   <UserPlus className="mr-2 h-4 w-4" />
-                  {inviteLoading ? "Sending..." : "Send Email Invite"}
+                  {inviteLoading ? "Sending invite..." : "Send Email Invite"}
                 </Button>
               </form>
             </CardContent>
           </Card>
         )}
 
-        {/* Backup dialog (kept, but not auto-used) */}
         <Dialog open={showInviteLink} onOpenChange={setShowInviteLink}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Backup Link</DialogTitle>
-              <DialogDescription>Normally invites are emailed. This is only if you ever need a manual link.</DialogDescription>
+              <DialogTitle>Invitation Link Created</DialogTitle>
+              <DialogDescription>Backup link (only if needed). Normally invites are sent by email now.</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="p-3 bg-muted rounded-md break-all text-sm">{inviteLink}</div>
               <Button
                 onClick={() => {
                   navigator.clipboard.writeText(inviteLink);
-                  toast({ title: "Copied!", description: "Backup link copied to clipboard" });
+                  toast({ title: "Copied!", description: "Invite link copied to clipboard" });
                 }}
                 className="w-full"
               >
