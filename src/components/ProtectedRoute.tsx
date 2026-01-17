@@ -13,21 +13,20 @@ const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
   useEffect(() => {
     let cancelled = false;
 
-    const check = async () => {
-      // 1) quick check
+    const run = async () => {
+      // Quick check
       const { data } = await supabase.auth.getSession();
       if (!cancelled) setIsAuthenticated(!!data.session);
 
-      // 2) If no session yet, wait a bit because:
-      // - magic link / recovery links often set session async after load
+      // If no session yet, give recovery/magic links time to land
       if (!data.session) {
-        await new Promise((r) => setTimeout(r, 800));
+        await new Promise((r) => setTimeout(r, 900));
         const { data: again } = await supabase.auth.getSession();
         if (!cancelled) setIsAuthenticated(!!again.session);
       }
     };
 
-    check();
+    run();
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!cancelled) setIsAuthenticated(!!session);
@@ -39,10 +38,8 @@ const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     };
   }, []);
 
-  // still checking
   if (isAuthenticated === null) return null;
 
-  // not authed -> send to auth, but keep where they tried to go
   if (!isAuthenticated) {
     return <Navigate to="/auth" replace state={{ from: location.pathname }} />;
   }
