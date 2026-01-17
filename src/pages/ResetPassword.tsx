@@ -8,6 +8,23 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useToast } from "@/hooks/use-toast";
 import { passwordSchema } from "@/lib/validations";
 
+function getCodeFromUrl(): string | null {
+  // 1) Normal query: https://site.com/reset-password?code=...
+  const url = new URL(window.location.href);
+  const codeFromSearch = url.searchParams.get("code");
+  if (codeFromSearch) return codeFromSearch;
+
+  // 2) Hash query: https://site.com/#/reset-password?code=...
+  // window.location.hash = "#/reset-password?code=XXXX"
+  const hash = window.location.hash || "";
+  const qIndex = hash.indexOf("?");
+  if (qIndex === -1) return null;
+
+  const hashQuery = hash.slice(qIndex + 1); // "code=XXXX&..."
+  const params = new URLSearchParams(hashQuery);
+  return params.get("code");
+}
+
 const ResetPassword = () => {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -22,10 +39,8 @@ const ResetPassword = () => {
 
     const verifyRecoverySession = async () => {
       try {
-        // 1) If Supabase sent a PKCE "code" in the URL, exchange it for a session
-        // Example: https://site/#/reset-password?code=XXXXX
-        const url = new URL(window.location.href);
-        const code = url.searchParams.get("code");
+        // If Supabase sent a PKCE "code", it might be in search OR inside the hash.
+        const code = getCodeFromUrl();
 
         if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
@@ -34,11 +49,9 @@ const ResetPassword = () => {
           }
         }
 
-        // 2) Now check session (more reliable than getUser() in these flows)
+        // Now check for an actual session
         const { data, error } = await supabase.auth.getSession();
-        if (error) {
-          console.error("getSession error:", error);
-        }
+        if (error) console.error("getSession error:", error);
 
         if (!cancelled) {
           setIsValidToken(!!data.session);
@@ -71,13 +84,9 @@ const ResetPassword = () => {
     setLoading(true);
 
     try {
-      // Validate password strength
       passwordSchema.parse(newPassword);
 
-      const { error } = await supabase.auth.updateUser({
-        password: newPassword,
-      });
-
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
       if (error) throw error;
 
       toast({
@@ -85,7 +94,6 @@ const ResetPassword = () => {
         description: "Your password has been successfully reset.",
       });
 
-      // After reset, send them to the app (or auth if you prefer)
       setTimeout(() => navigate("/dashboard"), 700);
     } catch (error: any) {
       toast({
@@ -124,11 +132,7 @@ const ResetPassword = () => {
             </Button>
             <Button
               variant="secondary"
-              onClick={() => {
-                // quick refresh attempt in case the code/session exchange lagged
-                setIsValidToken(null);
-                setTimeout(() => window.location.reload(), 50);
-              }}
+              onClick={() => window.location.reload()}
               className="w-full"
             >
               Try Again
