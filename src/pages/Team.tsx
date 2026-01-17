@@ -43,7 +43,7 @@ const Team = () => {
   const [inviteRole, setInviteRole] = useState<"staff" | "admin">("staff");
   const [inviteLoading, setInviteLoading] = useState(false);
 
-  // kept (but we won’t force showing the link anymore)
+  // Optional: keep a backup link dialog (OFF by default)
   const [showInviteLink, setShowInviteLink] = useState(false);
   const [inviteLink, setInviteLink] = useState("");
 
@@ -56,7 +56,6 @@ const Team = () => {
       navigate("/onboard");
       return;
     }
-
     fetchMembers();
     fetchInvites();
   }, [currentOrg, orgLoading, navigate]);
@@ -64,7 +63,6 @@ const Team = () => {
   const fetchMembers = async () => {
     if (!currentOrg) return;
 
-    // ✅ Pull email directly from org_users (after the SQL backfill + trigger)
     const { data, error } = await supabase
       .from("org_users")
       .select(
@@ -124,12 +122,9 @@ const Team = () => {
     try {
       const validatedEmail = emailSchema.parse(inviteEmail);
 
-      // ✅ Call Edge Function that:
-      // 1) inserts org_invites (token default)
-      // 2) sends Supabase Auth invite email
       const { data, error } = await supabase.functions.invoke("send-org-invite", {
         body: {
-          orgId: currentOrg.id,
+          orgId: currentOrg.id, // ✅ camelCase
           email: validatedEmail,
           role: inviteRole,
           invitedBy: user?.id ?? null,
@@ -137,35 +132,43 @@ const Team = () => {
         },
       });
 
-      if (error) throw error;
+      if (error) {
+        // Edge function returned non-2xx
+        throw new Error(error.message || "Edge Function failed");
+      }
+
       if (!data?.success) {
-        throw new Error(data?.error || "Failed to send invite email");
+        throw new Error(data?.error || data?.details || "Failed to send invite");
       }
 
       toast({
         title: "Invite sent!",
-        description: `Supabase emailed an invite to ${validatedEmail}`,
+        description: `An email invite was sent to ${validatedEmail}`,
       });
 
-      // Optional: if you still want a backup link for YOU only, you can keep it:
-      // (but you said you don’t want to send links, so we keep dialog OFF by default)
-      setInviteLink("");
-      setShowInviteLink(false);
+      // OPTIONAL backup link (we keep it OFF by default)
+      if (data?.redirect_to) {
+        setInviteLink(data.redirect_to);
+        setShowInviteLink(false); // you said you don’t want links; keep dialog closed
+      } else {
+        setInviteLink("");
+        setShowInviteLink(false);
+      }
 
       setInviteEmail("");
       setInviteRole("staff");
       fetchInvites();
-    } catch (error: any) {
-      if (error.name === "ZodError") {
+    } catch (err: any) {
+      if (err?.name === "ZodError") {
         toast({
           title: "Invalid Email",
-          description: error.errors[0]?.message || "Please enter a valid email address",
+          description: err.errors?.[0]?.message || "Please enter a valid email",
           variant: "destructive",
         });
       } else {
         toast({
           title: "Invite failed",
-          description: error.message || "Failed to create invitation",
+          description: err?.message || "Failed to send invite",
           variant: "destructive",
         });
       }
@@ -188,7 +191,7 @@ const Team = () => {
     navigator.clipboard.writeText(link);
     toast({
       title: "Link copied!",
-      description: "Invite link copied to clipboard",
+      description: "Invite link copied to clipboard (fallback).",
     });
   };
 
@@ -232,11 +235,7 @@ const Team = () => {
       return;
     }
 
-    const { error } = await supabase
-      .from("org_users")
-      .update({ role: newRole })
-      .eq("id", memberId)
-      .eq("org_id", currentOrg?.id);
+    const { error } = await supabase.from("org_users").update({ role: newRole }).eq("id", memberId).eq("org_id", currentOrg?.id);
 
     if (error) {
       toast({
@@ -303,7 +302,6 @@ const Team = () => {
           <p className="text-muted-foreground">Manage members and invitations for {currentOrg?.name}</p>
         </div>
 
-        {/* Current Team Members */}
         <Card>
           <CardHeader>
             <CardTitle>Team Members</CardTitle>
@@ -327,10 +325,7 @@ const Team = () => {
                     <TableCell>{member.email}</TableCell>
                     <TableCell>
                       {canManage && member.user_id !== user?.id && member.role !== "owner" ? (
-                        <Select
-                          value={member.role}
-                          onValueChange={(value) => updateMemberRole(member.id, member.user_id, value as "admin" | "staff")}
-                        >
+                        <Select value={member.role} onValueChange={(value) => updateMemberRole(member.id, member.user_id, value as "admin" | "staff")}>
                           <SelectTrigger className="w-32">
                             <SelectValue />
                           </SelectTrigger>
@@ -360,7 +355,6 @@ const Team = () => {
           </CardContent>
         </Card>
 
-        {/* Pending Invites */}
         <Card>
           <CardHeader>
             <CardTitle>Pending Invites</CardTitle>
@@ -406,21 +400,10 @@ const Team = () => {
                           <div className="flex justify-end gap-2">
                             {invite.status === "pending" && (
                               <>
-                                {/* optional fallback: copy link */}
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => copyInviteLink(invite.token)}
-                                  title="Copy invite link (fallback)"
-                                >
+                                <Button variant="ghost" size="icon" onClick={() => copyInviteLink(invite.token)} title="Copy invite link (fallback)">
                                   <Copy className="h-4 w-4" />
                                 </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => revokeInvite(invite.id)}
-                                  title="Revoke invite"
-                                >
+                                <Button variant="ghost" size="icon" onClick={() => revokeInvite(invite.id)} title="Revoke invite">
                                   <XCircle className="h-4 w-4 text-destructive" />
                                 </Button>
                               </>
@@ -436,12 +419,11 @@ const Team = () => {
           </CardContent>
         </Card>
 
-        {/* Invite Form */}
         {canManage && (
           <Card>
             <CardHeader>
               <CardTitle>Invite New Member</CardTitle>
-              <CardDescription>Send an invitation to join your organization</CardDescription>
+              <CardDescription>Send an email invitation to join your organization</CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={sendInvite} className="space-y-4">
@@ -470,30 +452,29 @@ const Team = () => {
                     </Select>
                   </div>
                 </div>
+
                 <Button type="submit" disabled={inviteLoading}>
                   <UserPlus className="mr-2 h-4 w-4" />
-                  {inviteLoading ? "Sending invite..." : "Send Email Invite"}
+                  {inviteLoading ? "Sending..." : "Send Email Invite"}
                 </Button>
               </form>
             </CardContent>
           </Card>
         )}
 
-        {/* Invite Link Dialog (kept but not used by default anymore) */}
+        {/* Backup dialog (kept, but not auto-used) */}
         <Dialog open={showInviteLink} onOpenChange={setShowInviteLink}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Invitation Link Created</DialogTitle>
-              <DialogDescription>
-                Backup link (only if needed). Normally invites are sent by email now.
-              </DialogDescription>
+              <DialogTitle>Backup Link</DialogTitle>
+              <DialogDescription>Normally invites are emailed. This is only if you ever need a manual link.</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="p-3 bg-muted rounded-md break-all text-sm">{inviteLink}</div>
               <Button
                 onClick={() => {
                   navigator.clipboard.writeText(inviteLink);
-                  toast({ title: "Copied!", description: "Invite link copied to clipboard" });
+                  toast({ title: "Copied!", description: "Backup link copied to clipboard" });
                 }}
                 className="w-full"
               >
