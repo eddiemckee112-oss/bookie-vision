@@ -13,21 +13,52 @@ const ResetPassword = () => {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [isValidToken, setIsValidToken] = useState<boolean | null>(null);
+
   const { toast } = useToast();
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Check if the user has a valid recovery token
-    const checkToken = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      setIsValidToken(!!user);
+    let cancelled = false;
+
+    const verifyRecoverySession = async () => {
+      try {
+        // 1) If Supabase sent a PKCE "code" in the URL, exchange it for a session
+        // Example: https://site/#/reset-password?code=XXXXX
+        const url = new URL(window.location.href);
+        const code = url.searchParams.get("code");
+
+        if (code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) {
+            console.error("exchangeCodeForSession error:", error);
+          }
+        }
+
+        // 2) Now check session (more reliable than getUser() in these flows)
+        const { data, error } = await supabase.auth.getSession();
+        if (error) {
+          console.error("getSession error:", error);
+        }
+
+        if (!cancelled) {
+          setIsValidToken(!!data.session);
+        }
+      } catch (e) {
+        console.error("verifyRecoverySession error:", e);
+        if (!cancelled) setIsValidToken(false);
+      }
     };
-    checkToken();
+
+    verifyRecoverySession();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (newPassword !== confirmPassword) {
       toast({
         title: "Passwords don't match",
@@ -51,11 +82,11 @@ const ResetPassword = () => {
 
       toast({
         title: "Password updated!",
-        description: "Your password has been successfully reset. You can now sign in.",
+        description: "Your password has been successfully reset.",
       });
 
-      // Wait a moment then redirect to auth page
-      setTimeout(() => navigate("/auth"), 2000);
+      // After reset, send them to the app (or auth if you prefer)
+      setTimeout(() => navigate("/dashboard"), 700);
     } catch (error: any) {
       toast({
         title: "Password reset failed",
@@ -72,7 +103,7 @@ const ResetPassword = () => {
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted p-4">
         <Card className="w-full max-w-md">
           <CardContent className="pt-6">
-            <p className="text-center text-muted-foreground">Verifying reset token...</p>
+            <p className="text-center text-muted-foreground">Verifying reset link...</p>
           </CardContent>
         </Card>
       </div>
@@ -85,16 +116,22 @@ const ResetPassword = () => {
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
             <CardTitle className="text-2xl font-bold">Invalid or Expired Link</CardTitle>
-            <CardDescription>
-              This password reset link is invalid or has expired.
-            </CardDescription>
+            <CardDescription>This password reset link is invalid or has expired.</CardDescription>
           </CardHeader>
-          <CardContent>
-            <Button 
-              onClick={() => navigate("/auth")} 
+          <CardContent className="space-y-3">
+            <Button onClick={() => navigate("/auth")} className="w-full">
+              Back to Sign In
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                // quick refresh attempt in case the code/session exchange lagged
+                setIsValidToken(null);
+                setTimeout(() => window.location.reload(), 50);
+              }}
               className="w-full"
             >
-              Back to Sign In
+              Try Again
             </Button>
           </CardContent>
         </Card>
@@ -126,6 +163,7 @@ const ResetPassword = () => {
                 Must include uppercase, lowercase, number, and special character
               </p>
             </div>
+
             <div className="space-y-2">
               <Label htmlFor="confirm-password">Confirm Password</Label>
               <Input
@@ -138,6 +176,7 @@ const ResetPassword = () => {
                 minLength={12}
               />
             </div>
+
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Resetting..." : "Reset Password"}
             </Button>
