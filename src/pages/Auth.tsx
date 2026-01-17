@@ -20,19 +20,22 @@ const Auth = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
 
+  // GitHub Pages base (includes /bookie-vision/)
+  const appBaseUrl = `${window.location.origin}${import.meta.env.BASE_URL}`.replace(/\/$/, "");
+
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
     try {
-      // Validate password strength
       passwordSchema.parse(password);
 
       const { error } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/`,
+          // land back inside the SPA
+          emailRedirectTo: `${appBaseUrl}/#/`,
         },
       });
 
@@ -40,7 +43,7 @@ const Auth = () => {
 
       toast({
         title: "Success!",
-        description: "Account created. Redirecting to setup...",
+        description: "Account created. Check your email if confirmation is enabled.",
       });
 
       navigate("/onboard");
@@ -67,7 +70,6 @@ const Auth = () => {
 
       if (error) throw error;
 
-      // Check how many orgs this user belongs to
       const { data: orgUsers, error: orgError } = await supabase
         .from("org_users")
         .select("org_id, role")
@@ -81,7 +83,6 @@ const Auth = () => {
         description: "Signed in successfully.",
       });
 
-      // Check if there's a pending invite token
       const pendingToken = localStorage.getItem("pendingInviteToken");
       if (pendingToken) {
         localStorage.removeItem("pendingInviteToken");
@@ -89,16 +90,12 @@ const Auth = () => {
         return;
       }
 
-      // Route based on org count
       if (!orgUsers || orgUsers.length === 0) {
-        // No orgs - go to onboarding
         navigate("/onboard");
       } else if (orgUsers.length === 1) {
-        // Exactly one org - set it as active and go to dashboard
         localStorage.setItem("currentOrgId", orgUsers[0].org_id);
         navigate("/dashboard");
       } else {
-        // Multiple orgs - let user choose
         navigate("/choose-org");
       }
     } catch (error: any) {
@@ -118,14 +115,14 @@ const Auth = () => {
 
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
-        redirectTo: `${window.location.origin}/reset-password`,
+        redirectTo: `${appBaseUrl}/#/reset-password`,
       });
 
       if (error) throw error;
 
       toast({
         title: "Check your email",
-        description: "If an account exists with that email, we've sent a reset link. Please check your inbox.",
+        description: "If an account exists, we sent a reset link.",
       });
 
       setShowResetDialog(false);
@@ -154,7 +151,7 @@ const Auth = () => {
               <TabsTrigger value="signin">Sign In</TabsTrigger>
               <TabsTrigger value="signup">Sign Up</TabsTrigger>
             </TabsList>
-            
+
             <TabsContent value="signin">
               <form onSubmit={handleSignIn} className="space-y-4">
                 <div className="space-y-2">
@@ -181,7 +178,7 @@ const Auth = () => {
                 <Button type="submit" className="w-full" disabled={loading}>
                   {loading ? "Signing in..." : "Sign In"}
                 </Button>
-                
+
                 <Dialog open={showResetDialog} onOpenChange={setShowResetDialog}>
                   <DialogTrigger asChild>
                     <Button variant="link" className="w-full text-sm">
@@ -191,9 +188,7 @@ const Auth = () => {
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>Reset Password</DialogTitle>
-                      <DialogDescription>
-                        Enter your email address and we'll send you a link to reset your password.
-                      </DialogDescription>
+                      <DialogDescription>Enter your email and we’ll send a reset link.</DialogDescription>
                     </DialogHeader>
                     <form onSubmit={handleForgotPassword} className="space-y-4">
                       <div className="space-y-2">
@@ -215,7 +210,7 @@ const Auth = () => {
                 </Dialog>
               </form>
             </TabsContent>
-            
+
             <TabsContent value="signup">
               <form onSubmit={handleSignUp} className="space-y-4">
                 <div className="space-y-2">
@@ -240,9 +235,7 @@ const Auth = () => {
                     required
                     minLength={12}
                   />
-                  <p className="text-xs text-muted-foreground">
-                    Must include uppercase, lowercase, number, and special character
-                  </p>
+                  <p className="text-xs text-muted-foreground">Must include uppercase, lowercase, number, and special character</p>
                 </div>
                 <Button type="submit" className="w-full" disabled={loading}>
                   {loading ? "Creating account..." : "Sign Up"}
