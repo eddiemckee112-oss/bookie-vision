@@ -13,7 +13,6 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { UserPlus, Trash2, Copy, XCircle } from "lucide-react";
 import { emailSchema } from "@/lib/validations";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface TeamMember {
   id: string;
@@ -43,12 +42,11 @@ const Team = () => {
   const [inviteRole, setInviteRole] = useState<"staff" | "admin">("staff");
   const [inviteLoading, setInviteLoading] = useState(false);
 
-  // fallback only (we won't auto-open this)
-  const [showInviteLink, setShowInviteLink] = useState(false);
-  const [inviteLink, setInviteLink] = useState("");
-
   const canManage = orgRole === "owner" || orgRole === "admin";
   const isOwner = orgRole === "owner";
+
+  // IMPORTANT: GitHub Pages needs the BASE_URL path ("/bookie-vision/") included.
+  const appBaseUrl = `${window.location.origin}${import.meta.env.BASE_URL}`.replace(/\/$/, "");
 
   useEffect(() => {
     if (orgLoading) return;
@@ -67,15 +65,7 @@ const Team = () => {
 
     const { data, error } = await supabase
       .from("org_users")
-      .select(
-        `
-        id,
-        user_id,
-        role,
-        email,
-        created_at
-      `,
-      )
+      .select("id, user_id, role, email, created_at")
       .eq("org_id", currentOrg.id)
       .order("created_at", { ascending: true });
 
@@ -95,7 +85,7 @@ const Team = () => {
         role: m.role,
         created_at: m.created_at,
         email: m.email || "Unknown",
-      })),
+      }))
     );
   };
 
@@ -116,19 +106,6 @@ const Team = () => {
     setInvites(data || []);
   };
 
-  // Supabase often hides real function errors behind “non-2xx”.
-  // This extracts the JSON error message from the function response.
-  const extractFunctionErrorMessage = async (err: any) => {
-    try {
-      const body = err?.context?.body;
-      if (!body) return err?.message || "Edge Function failed";
-      const parsed = typeof body === "string" ? JSON.parse(body) : body;
-      return parsed?.details || parsed?.error || err?.message || "Edge Function failed";
-    } catch {
-      return err?.message || "Edge Function failed";
-    }
-  };
-
   const sendInvite = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentOrg || !canManage) return;
@@ -139,36 +116,21 @@ const Team = () => {
 
       const { data, error } = await supabase.functions.invoke("send-org-invite", {
         body: {
-          orgId: currentOrg.id, // ✅ function also accepts org_id now
+          orgId: currentOrg.id, // MUST be orgId (camelCase) to match function
           email: validatedEmail,
           role: inviteRole,
           invitedBy: user?.id ?? null,
-          origin: window.location.origin,
+          origin: appBaseUrl, // MUST include /bookie-vision
         },
       });
 
-      if (error) {
-        const msg = await extractFunctionErrorMessage(error);
-        throw new Error(msg);
-      }
-
-      if (!data?.success) {
-        throw new Error(data?.details || data?.error || "Failed to send invite email");
-      }
+      if (error) throw new Error(error.message || "Edge Function failed");
+      if (!data?.success) throw new Error(data?.error || data?.details || "Failed to send invite email");
 
       toast({
         title: "Invite sent!",
         description: `Invite email sent to ${validatedEmail}`,
       });
-
-      // Fallback link (ONLY if you ever need it)
-      if (data?.invite_token) {
-        setInviteLink(`${window.location.origin}/#/accept-invite?token=${data.invite_token}`);
-        setShowInviteLink(false);
-      } else {
-        setInviteLink("");
-        setShowInviteLink(false);
-      }
 
       setInviteEmail("");
       setInviteRole("staff");
@@ -176,7 +138,7 @@ const Team = () => {
     } catch (err: any) {
       toast({
         title: "Invite failed",
-        description: err?.message || "Failed to send invite",
+        description: err.message || "Failed to send invite",
         variant: "destructive",
       });
     } finally {
@@ -194,7 +156,8 @@ const Team = () => {
       return;
     }
 
-    const link = `${window.location.origin}/#/accept-invite?token=${token}`;
+    // HashRouter link for GitHub pages:
+    const link = `${appBaseUrl}/#/accept-invite?token=${token}`;
     navigator.clipboard.writeText(link);
     toast({
       title: "Link copied!",
@@ -242,11 +205,7 @@ const Team = () => {
       return;
     }
 
-    const { error } = await supabase
-      .from("org_users")
-      .update({ role: newRole })
-      .eq("id", memberId)
-      .eq("org_id", currentOrg?.id);
+    const { error } = await supabase.from("org_users").update({ role: newRole }).eq("id", memberId).eq("org_id", currentOrg?.id);
 
     if (error) {
       toast({
@@ -378,7 +337,7 @@ const Team = () => {
           </CardHeader>
           <CardContent>
             {invites.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No pending invites</p>
+              <p className="text-sm text-muted-foreground">No invites</p>
             ) : (
               <Table>
                 <TableHeader>
@@ -400,32 +359,30 @@ const Team = () => {
                       <TableCell>
                         <Badge
                           variant={
-                            invite.status === "pending" ? "default" : invite.status === "accepted" ? "secondary" : "destructive"
+                            invite.status === "pending"
+                              ? "default"
+                              : invite.status === "accepted"
+                              ? "secondary"
+                              : "destructive"
                           }
                         >
                           {invite.status}
                         </Badge>
                       </TableCell>
                       <TableCell>{new Date(invite.created_at).toLocaleDateString()}</TableCell>
+
                       {canManage && (
                         <TableCell className="text-right">
-                          <div className="flex justify-end gap-2">
-                            {invite.status === "pending" && (
-                              <>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => copyInviteLink(invite.token)}
-                                  title="Copy invite link (fallback)"
-                                >
-                                  <Copy className="h-4 w-4" />
-                                </Button>
-                                <Button variant="ghost" size="icon" onClick={() => revokeInvite(invite.id)} title="Revoke invite">
-                                  <XCircle className="h-4 w-4 text-destructive" />
-                                </Button>
-                              </>
-                            )}
-                          </div>
+                          {invite.status === "pending" && (
+                            <div className="flex justify-end gap-2">
+                              <Button variant="ghost" size="icon" onClick={() => copyInviteLink(invite.token)} title="Copy fallback link">
+                                <Copy className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="icon" onClick={() => revokeInvite(invite.id)} title="Revoke invite">
+                                <XCircle className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </div>
+                          )}
                         </TableCell>
                       )}
                     </TableRow>
@@ -470,6 +427,7 @@ const Team = () => {
                     </Select>
                   </div>
                 </div>
+
                 <Button type="submit" disabled={inviteLoading}>
                   <UserPlus className="mr-2 h-4 w-4" />
                   {inviteLoading ? "Sending invite..." : "Send Email Invite"}
@@ -478,29 +436,6 @@ const Team = () => {
             </CardContent>
           </Card>
         )}
-
-        {/* Fallback dialog (not used by default) */}
-        <Dialog open={showInviteLink} onOpenChange={setShowInviteLink}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Invitation Link Created</DialogTitle>
-              <DialogDescription>Backup link (only if needed). Normally invites are sent by email now.</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div className="p-3 bg-muted rounded-md break-all text-sm">{inviteLink}</div>
-              <Button
-                onClick={() => {
-                  navigator.clipboard.writeText(inviteLink);
-                  toast({ title: "Copied!", description: "Invite link copied to clipboard" });
-                }}
-                className="w-full"
-              >
-                <Copy className="mr-2 h-4 w-4" />
-                Copy to Clipboard
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
       </div>
     </Layout>
   );
