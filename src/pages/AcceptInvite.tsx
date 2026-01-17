@@ -10,7 +10,13 @@ const AcceptInvite = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const token = searchParams.get("token");
+
+  // ✅ token from URL OR fallback from localStorage (important for email-invite + auth redirects)
+  const tokenFromUrl = searchParams.get("token");
+  const tokenFromStorage =
+    typeof window !== "undefined" ? localStorage.getItem("pendingInviteToken") : null;
+
+  const token = tokenFromUrl || tokenFromStorage;
 
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<"checking" | "success" | "error" | "needs-auth">("checking");
@@ -19,6 +25,7 @@ const AcceptInvite = () => {
 
   useEffect(() => {
     checkInviteAndAccept();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   const checkInviteAndAccept = async () => {
@@ -30,24 +37,30 @@ const AcceptInvite = () => {
     }
 
     // Check if user is authenticated
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
     if (!user) {
       // User needs to sign in first
       setStatus("needs-auth");
       setMessage("Please sign in or create an account to accept this invitation");
       setLoading(false);
-      // Store token for after authentication
+
+      // ✅ Store token for after authentication
       localStorage.setItem("pendingInviteToken", token);
       return;
     }
 
     // User is authenticated, proceed with invite acceptance
     try {
+      // ✅ Once logged in, no longer need the stored token
+      localStorage.removeItem("pendingInviteToken");
+
       // Look up the invite
       const { data: invite, error: inviteError } = await supabase
         .from("org_invites")
-        .select("*, orgs(name)")
+        .select("id, org_id, email, role, status, token, orgs(name)")
         .eq("token", token)
         .eq("status", "pending")
         .single();
@@ -61,37 +74,36 @@ const AcceptInvite = () => {
 
       setOrgName(invite.orgs?.name || "the organization");
 
-      // Check if user is already a member
-      const { data: existingMember } = await supabase
+      // ✅ Check if user is already a member (use maybeSingle so it doesn't throw)
+      const { data: existingMember, error: existingErr } = await supabase
         .from("org_users")
         .select("id")
         .eq("org_id", invite.org_id)
         .eq("user_id", user.id)
-        .single();
+        .maybeSingle();
+
+      if (existingErr) {
+        throw existingErr;
+      }
 
       if (existingMember) {
         // Already a member, just mark invite as accepted
-        await supabase
-          .from("org_invites")
-          .update({ status: "accepted" })
-          .eq("id", invite.id);
+        await supabase.from("org_invites").update({ status: "accepted" }).eq("id", invite.id);
 
         setStatus("success");
-        setMessage(`You're already a member of ${orgName}. Redirecting to dashboard...`);
-        
+        setMessage(`You're already a member of ${invite.orgs?.name || "this org"}. Redirecting...`);
+
         localStorage.setItem("currentOrgId", invite.org_id);
-        setTimeout(() => navigate("/dashboard"), 2000);
+        setTimeout(() => navigate("/dashboard"), 1500);
         return;
       }
 
       // Add user to org
-      const { error: insertError } = await supabase
-        .from("org_users")
-        .insert({
-          org_id: invite.org_id,
-          user_id: user.id,
-          role: invite.role,
-        });
+      const { error: insertError } = await supabase.from("org_users").insert({
+        org_id: invite.org_id,
+        user_id: user.id,
+        role: invite.role, // must match your enum values
+      });
 
       if (insertError) throw insertError;
 
@@ -105,15 +117,15 @@ const AcceptInvite = () => {
 
       toast({
         title: "Invitation accepted!",
-        description: `You've joined ${orgName} as ${invite.role}`,
+        description: `You've joined ${invite.orgs?.name || "the organization"} as ${invite.role}`,
       });
 
       setStatus("success");
-      setMessage(`Successfully joined ${orgName}!`);
+      setMessage(`Successfully joined ${invite.orgs?.name || "the organization"}!`);
 
       // Set this org as active and redirect
       localStorage.setItem("currentOrgId", invite.org_id);
-      setTimeout(() => navigate("/dashboard"), 2000);
+      setTimeout(() => navigate("/dashboard"), 1500);
     } catch (error: any) {
       console.error("Error accepting invite:", error);
       setStatus("error");
@@ -124,7 +136,7 @@ const AcceptInvite = () => {
   };
 
   const handleSignIn = () => {
-    // Redirect to auth page, token is already stored in localStorage
+    // Redirect to auth page; token is stored in localStorage
     navigate("/auth");
   };
 
@@ -170,9 +182,7 @@ const AcceptInvite = () => {
               <XCircle className="h-16 w-16 text-destructive" />
             )}
           </div>
-          <CardTitle>
-            {status === "success" ? "Invitation Accepted!" : "Invitation Error"}
-          </CardTitle>
+          <CardTitle>{status === "success" ? "Invitation Accepted!" : "Invitation Error"}</CardTitle>
           <CardDescription>{message}</CardDescription>
         </CardHeader>
         <CardContent>
