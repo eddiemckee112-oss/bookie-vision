@@ -8,65 +8,63 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useToast } from "@/hooks/use-toast";
 import { passwordSchema } from "@/lib/validations";
 
-function getCodeFromUrl(): string | null {
-  // 1) Normal query: https://site.com/reset-password?code=...
-  const url = new URL(window.location.href);
-  const codeFromSearch = url.searchParams.get("code");
-  if (codeFromSearch) return codeFromSearch;
+function getParamFromHashOrSearch(key: string) {
+  // 1) normal query params (rare in hash router)
+  const search = new URLSearchParams(window.location.search);
+  const fromSearch = search.get(key);
+  if (fromSearch) return fromSearch;
 
-  // 2) Hash query: https://site.com/#/reset-password?code=...
-  // window.location.hash = "#/reset-password?code=XXXX"
+  // 2) hash route query params (common: /#/reset-password?code=...)
   const hash = window.location.hash || "";
-  const qIndex = hash.indexOf("?");
-  if (qIndex === -1) return null;
+  const idx = hash.indexOf("?");
+  if (idx === -1) return null;
 
-  const hashQuery = hash.slice(qIndex + 1); // "code=XXXX&..."
-  const params = new URLSearchParams(hashQuery);
-  return params.get("code");
+  const hashQuery = hash.slice(idx + 1);
+  const hashParams = new URLSearchParams(hashQuery);
+  return hashParams.get(key);
 }
 
 const ResetPassword = () => {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [isValidToken, setIsValidToken] = useState<boolean | null>(null);
+  const [checking, setChecking] = useState(true);
+  const [isValidToken, setIsValidToken] = useState<boolean>(false);
 
   const { toast } = useToast();
   const navigate = useNavigate();
 
   useEffect(() => {
-    let cancelled = false;
-
-    const verifyRecoverySession = async () => {
+    const run = async () => {
       try {
-        // If Supabase sent a PKCE "code", it might be in search OR inside the hash.
-        const code = getCodeFromUrl();
+        // Supabase recovery links can be:
+        // - PKCE: ?code=... (but in hash routing it becomes /#/reset-password?code=...)
+        // - or older implicit tokens (less common now)
+        const code = getParamFromHashOrSearch("code");
 
         if (code) {
-          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          // exchangeCodeForSession expects the code in the URL query, not inside the hash
+          const fakeUrl = new URL(window.location.origin);
+          fakeUrl.searchParams.set("code", code);
+
+          const { error } = await supabase.auth.exchangeCodeForSession(fakeUrl.toString());
           if (error) {
             console.error("exchangeCodeForSession error:", error);
           }
         }
 
-        // Now check for an actual session
-        const { data, error } = await supabase.auth.getSession();
-        if (error) console.error("getSession error:", error);
-
-        if (!cancelled) {
-          setIsValidToken(!!data.session);
-        }
+        // Now check if we have a user/session
+        const { data } = await supabase.auth.getUser();
+        setIsValidToken(!!data.user);
       } catch (e) {
-        console.error("verifyRecoverySession error:", e);
-        if (!cancelled) setIsValidToken(false);
+        console.error("Reset token check error:", e);
+        setIsValidToken(false);
+      } finally {
+        setChecking(false);
       }
     };
 
-    verifyRecoverySession();
-
-    return () => {
-      cancelled = true;
-    };
+    run();
   }, []);
 
   const handleResetPassword = async (e: React.FormEvent) => {
@@ -91,10 +89,12 @@ const ResetPassword = () => {
 
       toast({
         title: "Password updated!",
-        description: "Your password has been successfully reset.",
+        description: "Your password has been successfully reset. You can now sign in.",
       });
 
-      setTimeout(() => navigate("/dashboard"), 700);
+      // optional: sign out then go to login
+      await supabase.auth.signOut();
+      navigate("/auth");
     } catch (error: any) {
       toast({
         title: "Password reset failed",
@@ -106,12 +106,12 @@ const ResetPassword = () => {
     }
   };
 
-  if (isValidToken === null) {
+  if (checking) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted p-4">
         <Card className="w-full max-w-md">
           <CardContent className="pt-6">
-            <p className="text-center text-muted-foreground">Verifying reset link...</p>
+            <p className="text-center text-muted-foreground">Verifying reset token...</p>
           </CardContent>
         </Card>
       </div>
@@ -126,16 +126,9 @@ const ResetPassword = () => {
             <CardTitle className="text-2xl font-bold">Invalid or Expired Link</CardTitle>
             <CardDescription>This password reset link is invalid or has expired.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-2">
             <Button onClick={() => navigate("/auth")} className="w-full">
               Back to Sign In
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => window.location.reload()}
-              className="w-full"
-            >
-              Try Again
             </Button>
           </CardContent>
         </Card>
@@ -163,9 +156,7 @@ const ResetPassword = () => {
                 required
                 minLength={12}
               />
-              <p className="text-xs text-muted-foreground">
-                Must include uppercase, lowercase, number, and special character
-              </p>
+              <p className="text-xs text-muted-foreground">Must include uppercase, lowercase, number, and special character</p>
             </div>
 
             <div className="space-y-2">
