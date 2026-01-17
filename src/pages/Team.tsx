@@ -120,52 +120,42 @@ const Team = () => {
     try {
       const validatedEmail = emailSchema.parse(inviteEmail);
 
-      const { data, error } = await supabase
-        .from("org_invites")
-        .insert([
-          {
-            org_id: currentOrg.id,
-            email: validatedEmail,
-            role: inviteRole as any, // ✅ enum-safe against stale client schema
-            invited_by: user?.id,
-            status: "pending",
-          },
-        ])
-        .select("id, email, role, status, token, created_at")
-        .single();
+      // ✅ Call Edge Function that:
+      // 1) creates org_invites row (token)
+      // 2) sends Supabase Auth invite email
+      const { data, error } = await supabase.functions.invoke("send-org-invite", {
+        body: {
+          orgId: currentOrg.id,
+          email: validatedEmail,
+          role: inviteRole,
+        },
+      });
 
       if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || "Invite failed");
 
-      if (!data?.token) {
-        throw new Error("Invite created but token was not returned. Refresh and try again.");
-      }
+      // Still show link (nice fallback), BUT email was sent
+      const link =
+        data?.redirectTo ||
+        `${window.location.origin}/accept-invite?token=${data?.invite?.token}`;
 
-      const link = `${window.location.origin}/accept-invite?token=${data.token}`;
       setInviteLink(link);
       setShowInviteLink(true);
 
       toast({
-        title: "Invite created!",
-        description: `Invitation created for ${validatedEmail}`,
+        title: "Invite email sent!",
+        description: `Invitation emailed to ${validatedEmail}`,
       });
 
       setInviteEmail("");
       setInviteRole("staff");
       fetchInvites();
     } catch (error: any) {
-      if (error.name === "ZodError") {
-        toast({
-          title: "Invalid Email",
-          description: error.errors[0]?.message || "Please enter a valid email address",
-          variant: "destructive",
-        });
-      } else {
-        toast({
-          title: "Invite failed",
-          description: error.message || "Failed to create invitation",
-          variant: "destructive",
-        });
-      }
+      toast({
+        title: "Invite failed",
+        description: error.message || "Failed to create invitation",
+        variant: "destructive",
+      });
     } finally {
       setInviteLoading(false);
     }
@@ -494,9 +484,9 @@ const Team = () => {
         <Dialog open={showInviteLink} onOpenChange={setShowInviteLink}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Invitation Link Created</DialogTitle>
+              <DialogTitle>Invitation Email Sent</DialogTitle>
               <DialogDescription>
-                Share this link with the person you want to invite. They'll need to sign in or sign up to accept.
+                We emailed the invite. This link is just a backup you can copy if needed.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
@@ -511,7 +501,7 @@ const Team = () => {
                 className="w-full"
               >
                 <Copy className="mr-2 h-4 w-4" />
-                Copy to Clipboard
+                Copy Backup Link
               </Button>
             </div>
           </DialogContent>
