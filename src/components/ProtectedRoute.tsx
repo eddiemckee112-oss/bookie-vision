@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 
 interface ProtectedRouteProps {
@@ -8,30 +8,43 @@ interface ProtectedRouteProps {
 
 const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const location = useLocation();
 
   useEffect(() => {
-    const checkAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setIsAuthenticated(!!session);
+    let cancelled = false;
+
+    const check = async () => {
+      // 1) quick check
+      const { data } = await supabase.auth.getSession();
+      if (!cancelled) setIsAuthenticated(!!data.session);
+
+      // 2) If no session yet, wait a bit because:
+      // - magic link / recovery links often set session async after load
+      if (!data.session) {
+        await new Promise((r) => setTimeout(r, 800));
+        const { data: again } = await supabase.auth.getSession();
+        if (!cancelled) setIsAuthenticated(!!again.session);
+      }
     };
 
-    checkAuth();
+    check();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setIsAuthenticated(!!session);
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!cancelled) setIsAuthenticated(!!session);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
-  // Show nothing while checking authentication
-  if (isAuthenticated === null) {
-    return null;
-  }
+  // still checking
+  if (isAuthenticated === null) return null;
 
-  // Redirect to auth if not authenticated
+  // not authed -> send to auth, but keep where they tried to go
   if (!isAuthenticated) {
-    return <Navigate to="/auth" replace />;
+    return <Navigate to="/auth" replace state={{ from: location.pathname }} />;
   }
 
   return <>{children}</>;
