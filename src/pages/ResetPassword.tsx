@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -8,63 +8,47 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useToast } from "@/hooks/use-toast";
 import { passwordSchema } from "@/lib/validations";
 
-function getParamFromHashOrSearch(key: string) {
-  // 1) normal query params (rare in hash router)
-  const search = new URLSearchParams(window.location.search);
-  const fromSearch = search.get(key);
-  if (fromSearch) return fromSearch;
-
-  // 2) hash route query params (common: /#/reset-password?code=...)
-  const hash = window.location.hash || "";
-  const idx = hash.indexOf("?");
-  if (idx === -1) return null;
-
-  const hashQuery = hash.slice(idx + 1);
-  const hashParams = new URLSearchParams(hashQuery);
-  return hashParams.get(key);
-}
-
 const ResetPassword = () => {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [checking, setChecking] = useState(true);
-  const [isValidToken, setIsValidToken] = useState<boolean>(false);
+
+  // null = checking, true = ok, false = expired/invalid
+  const [ready, setReady] = useState<boolean | null>(null);
 
   const { toast } = useToast();
   const navigate = useNavigate();
 
   useEffect(() => {
-    const run = async () => {
-      try {
-        // Supabase recovery links can be:
-        // - PKCE: ?code=... (but in hash routing it becomes /#/reset-password?code=...)
-        // - or older implicit tokens (less common now)
-        const code = getParamFromHashOrSearch("code");
+    let cancelled = false;
 
-        if (code) {
-          // exchangeCodeForSession expects the code in the URL query, not inside the hash
-          const fakeUrl = new URL(window.location.origin);
-          fakeUrl.searchParams.set("code", code);
-
-          const { error } = await supabase.auth.exchangeCodeForSession(fakeUrl.toString());
-          if (error) {
-            console.error("exchangeCodeForSession error:", error);
-          }
-        }
-
-        // Now check if we have a user/session
-        const { data } = await supabase.auth.getUser();
-        setIsValidToken(!!data.user);
-      } catch (e) {
-        console.error("Reset token check error:", e);
-        setIsValidToken(false);
-      } finally {
-        setChecking(false);
+    const ensureSession = async () => {
+      // Give Supabase time to process the recovery link & establish session
+      const { data } = await supabase.auth.getSession();
+      if (data.session) {
+        if (!cancelled) setReady(true);
+        return;
       }
+
+      await new Promise((r) => setTimeout(r, 900));
+      const { data: again } = await supabase.auth.getSession();
+
+      if (!cancelled) setReady(!!again.session);
     };
 
-    run();
+    ensureSession();
+
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      // When arriving from the email link, you may see events like SIGNED_IN / PASSWORD_RECOVERY
+      if (event === "SIGNED_IN" || event === "PASSWORD_RECOVERY" || event === "TOKEN_REFRESHED") {
+        setReady(true);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
   const handleResetPassword = async (e: React.FormEvent) => {
@@ -80,7 +64,6 @@ const ResetPassword = () => {
     }
 
     setLoading(true);
-
     try {
       passwordSchema.parse(newPassword);
 
@@ -89,36 +72,40 @@ const ResetPassword = () => {
 
       toast({
         title: "Password updated!",
-        description: "Your password has been successfully reset. You can now sign in.",
+        description: "Your password has been reset. Please sign in again.",
       });
 
-      // optional: sign out then go to login
+      // For safety, sign out so they re-auth with new password
       await supabase.auth.signOut();
-      navigate("/auth");
-    } catch (error: any) {
+
+      navigate("/auth", { replace: true });
+    } catch (err: any) {
       toast({
         title: "Password reset failed",
-        description: error.message || "Failed to reset password",
+        description: err?.message || "Failed to reset password",
         variant: "destructive",
       });
+
+      // if token/session is bad, show the expired UI
+      setReady(false);
     } finally {
       setLoading(false);
     }
   };
 
-  if (checking) {
+  if (ready === null) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted p-4">
         <Card className="w-full max-w-md">
           <CardContent className="pt-6">
-            <p className="text-center text-muted-foreground">Verifying reset token...</p>
+            <p className="text-center text-muted-foreground">Opening reset link...</p>
           </CardContent>
         </Card>
       </div>
     );
   }
 
-  if (!isValidToken) {
+  if (!ready) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted p-4">
         <Card className="w-full max-w-md">
@@ -126,7 +113,7 @@ const ResetPassword = () => {
             <CardTitle className="text-2xl font-bold">Invalid or Expired Link</CardTitle>
             <CardDescription>This password reset link is invalid or has expired.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-2">
+          <CardContent className="space-y-3">
             <Button onClick={() => navigate("/auth")} className="w-full">
               Back to Sign In
             </Button>
@@ -156,7 +143,9 @@ const ResetPassword = () => {
                 required
                 minLength={12}
               />
-              <p className="text-xs text-muted-foreground">Must include uppercase, lowercase, number, and special character</p>
+              <p className="text-xs text-muted-foreground">
+                Must include uppercase, lowercase, number, and special character
+              </p>
             </div>
 
             <div className="space-y-2">
