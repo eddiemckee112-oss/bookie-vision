@@ -33,8 +33,15 @@ const App = () => (
           <HashRouter>
             <Routes>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
+
+              {/* PUBLIC */}
               <Route path="/auth" element={<Auth />} />
               <Route path="/reset-password" element={<ResetPassword />} />
+
+              {/* ✅ IMPORTANT: Invite accept must be PUBLIC (no ProtectedRoute) */}
+              <Route path="/accept-invite" element={<AcceptInvite />} />
+
+              {/* PROTECTED */}
               <Route
                 path="/onboard"
                 element={
@@ -48,14 +55,6 @@ const App = () => (
                 element={
                   <ProtectedRoute>
                     <ChooseOrg />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/accept-invite"
-                element={
-                  <ProtectedRoute>
-                    <AcceptInvite />
                   </ProtectedRoute>
                 }
               />
@@ -123,6 +122,7 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
+
               <Route path="*" element={<NotFound />} />
             </Routes>
           </HashRouter>
