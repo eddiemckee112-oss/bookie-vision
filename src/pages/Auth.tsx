@@ -7,20 +7,32 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { passwordSchema } from "@/lib/validations";
 
 const Auth = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+
   const [resetEmail, setResetEmail] = useState("");
   const [resetLoading, setResetLoading] = useState(false);
   const [showResetDialog, setShowResetDialog] = useState(false);
+
   const { toast } = useToast();
   const navigate = useNavigate();
 
-  // GitHub Pages base (includes /bookie-vision/)
+  // ✅ For GitHub Pages + HashRouter:
+  // window.location.origin = https://eddiemckee112-oss.github.io
+  // import.meta.env.BASE_URL = /bookie-vision/
+  // appBaseUrl => https://eddiemckee112-oss.github.io/bookie-vision
   const appBaseUrl = `${window.location.origin}${import.meta.env.BASE_URL}`.replace(/\/$/, "");
 
   const handleSignUp = async (e: React.FormEvent) => {
@@ -34,7 +46,7 @@ const Auth = () => {
         email,
         password,
         options: {
-          // land back inside the SPA
+          // ✅ must include /#/ for HashRouter
           emailRedirectTo: `${appBaseUrl}/#/`,
         },
       });
@@ -46,6 +58,7 @@ const Auth = () => {
         description: "Account created. Check your email if confirmation is enabled.",
       });
 
+      // If confirmation is ON, user may not be logged in yet — still ok to go here
       navigate("/onboard");
     } catch (error: any) {
       toast({
@@ -83,6 +96,7 @@ const Auth = () => {
         description: "Signed in successfully.",
       });
 
+      // If there was an invite waiting, accept it now
       const pendingToken = localStorage.getItem("pendingInviteToken");
       if (pendingToken) {
         localStorage.removeItem("pendingInviteToken");
@@ -115,6 +129,7 @@ const Auth = () => {
 
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
+        // ✅ must include /#/reset-password for HashRouter + GitHub pages base path
         redirectTo: `${appBaseUrl}/#/reset-password`,
       });
 
@@ -165,6 +180,7 @@ const Auth = () => {
                     required
                   />
                 </div>
+
                 <div className="space-y-2">
                   <Label htmlFor="signin-password">Password</Label>
                   <Input
@@ -175,6 +191,7 @@ const Auth = () => {
                     required
                   />
                 </div>
+
                 <Button type="submit" className="w-full" disabled={loading}>
                   {loading ? "Signing in..." : "Sign In"}
                 </Button>
@@ -185,11 +202,13 @@ const Auth = () => {
                       Forgot your password?
                     </Button>
                   </DialogTrigger>
+
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>Reset Password</DialogTitle>
                       <DialogDescription>Enter your email and we’ll send a reset link.</DialogDescription>
                     </DialogHeader>
+
                     <form onSubmit={handleForgotPassword} className="space-y-4">
                       <div className="space-y-2">
                         <Label htmlFor="reset-email">Email</Label>
@@ -202,6 +221,7 @@ const Auth = () => {
                           required
                         />
                       </div>
+
                       <Button type="submit" className="w-full" disabled={resetLoading}>
                         {resetLoading ? "Sending..." : "Send Reset Link"}
                       </Button>
@@ -224,6 +244,7 @@ const Auth = () => {
                     required
                   />
                 </div>
+
                 <div className="space-y-2">
                   <Label htmlFor="signup-password">Password</Label>
                   <Input
@@ -235,8 +256,11 @@ const Auth = () => {
                     required
                     minLength={12}
                   />
-                  <p className="text-xs text-muted-foreground">Must include uppercase, lowercase, number, and special character</p>
+                  <p className="text-xs text-muted-foreground">
+                    Must include uppercase, lowercase, number, and special character
+                  </p>
                 </div>
+
                 <Button type="submit" className="w-full" disabled={loading}>
                   {loading ? "Creating account..." : "Sign Up"}
                 </Button>
