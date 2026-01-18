@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+// src/pages/ResetPassword.tsx
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -8,40 +9,88 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useToast } from "@/hooks/use-toast";
 import { passwordSchema } from "@/lib/validations";
 
+type ReadyState = "checking" | "ready" | "expired";
+
+function getHashParams() {
+  // HashRouter URLs look like:
+  // https://site/bookie-vision/#/reset-password?code=...&type=recovery
+  // or sometimes:
+  // https://site/bookie-vision/#access_token=...&type=recovery&...
+  const raw = window.location.hash || "";
+  const afterHash = raw.startsWith("#") ? raw.slice(1) : raw;
+
+  // If hash contains a route, params come after '?'
+  const qIndex = afterHash.indexOf("?");
+  if (qIndex >= 0) {
+    return new URLSearchParams(afterHash.slice(qIndex + 1));
+  }
+
+  // If it's a pure fragment token (no route), it looks like key=value&key=value
+  if (afterHash.includes("=") && afterHash.includes("&")) {
+    // strip leading "/" if present
+    const cleaned = afterHash.startsWith("/") ? afterHash.slice(1) : afterHash;
+    return new URLSearchParams(cleaned);
+  }
+
+  return new URLSearchParams("");
+}
+
 const ResetPassword = () => {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
-
-  // null = checking, true = ok, false = expired/invalid
-  const [ready, setReady] = useState<boolean | null>(null);
+  const [state, setState] = useState<ReadyState>("checking");
 
   const { toast } = useToast();
   const navigate = useNavigate();
 
+  const hasRecoverySignal = useMemo(() => {
+    const p = getHashParams();
+    const type = p.get("type") || "";
+    // Supabase can send either:
+    // - PKCE: ?code=...&type=recovery
+    // - implicit: #access_token=...&type=recovery...
+    const hasCode = !!p.get("code");
+    const hasAccessToken = !!p.get("access_token");
+    return type === "recovery" || hasCode || hasAccessToken;
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
-    const ensureSession = async () => {
-      // Give Supabase time to process the recovery link & establish session
-      const { data } = await supabase.auth.getSession();
-      if (data.session) {
-        if (!cancelled) setReady(true);
+    const hydrate = async () => {
+      // 1) If we don't even see recovery params in the URL, it's not a valid entry
+      if (!hasRecoverySignal) {
+        if (!cancelled) setState("expired");
         return;
       }
 
-      await new Promise((r) => setTimeout(r, 900));
-      const { data: again } = await supabase.auth.getSession();
+      // 2) Give Supabase a moment to process the link (PKCE exchange/session creation)
+      const tryGetSession = async () => {
+        const { data } = await supabase.auth.getSession();
+        return data.session ?? null;
+      };
 
-      if (!cancelled) setReady(!!again.session);
+      // Try a few times (GH Pages + hash routing sometimes needs a beat)
+      for (let i = 0; i < 6; i++) {
+        const session = await tryGetSession();
+        if (session) {
+          if (!cancelled) setState("ready");
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 350));
+      }
+
+      // 3) If still no session, treat as expired/invalid
+      if (!cancelled) setState("expired");
     };
 
-    ensureSession();
+    hydrate();
 
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-      // When arriving from the email link, you may see events like SIGNED_IN / PASSWORD_RECOVERY
-      if (event === "SIGNED_IN" || event === "PASSWORD_RECOVERY" || event === "TOKEN_REFRESHED") {
-        setReady(true);
+      // When arriving from the email link you may see PASSWORD_RECOVERY or SIGNED_IN
+      if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+        setState("ready");
       }
     });
 
@@ -49,7 +98,7 @@ const ResetPassword = () => {
       cancelled = true;
       sub.subscription.unsubscribe();
     };
-  }, []);
+  }, [hasRecoverySignal]);
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,8 +124,13 @@ const ResetPassword = () => {
         description: "Your password has been reset. Please sign in again.",
       });
 
-      // For safety, sign out so they re-auth with new password
+      // Sign out so the next sign-in uses the new password cleanly
       await supabase.auth.signOut();
+
+      // Clean the URL so the old recovery token doesn't keep re-triggering weird flows
+      try {
+        window.location.hash = "#/auth";
+      } catch {}
 
       navigate("/auth", { replace: true });
     } catch (err: any) {
@@ -85,15 +139,12 @@ const ResetPassword = () => {
         description: err?.message || "Failed to reset password",
         variant: "destructive",
       });
-
-      // if token/session is bad, show the expired UI
-      setReady(false);
     } finally {
       setLoading(false);
     }
   };
 
-  if (ready === null) {
+  if (state === "checking") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted p-4">
         <Card className="w-full max-w-md">
@@ -105,7 +156,7 @@ const ResetPassword = () => {
     );
   }
 
-  if (!ready) {
+  if (state === "expired") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted p-4">
         <Card className="w-full max-w-md">
@@ -116,6 +167,16 @@ const ResetPassword = () => {
           <CardContent className="space-y-3">
             <Button onClick={() => navigate("/auth")} className="w-full">
               Back to Sign In
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                // quick reload (sometimes GH pages caches a weird hash state)
+                window.location.reload();
+              }}
+              className="w-full"
+            >
+              Try Again
             </Button>
           </CardContent>
         </Card>
