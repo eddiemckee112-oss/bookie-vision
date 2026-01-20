@@ -70,17 +70,10 @@ const Receipts = () => {
 
     setReceipts(receiptsData || []);
 
-    const { data: matchesData, error: matchesErr } = await supabase
+    const { data: matchesData } = await supabase
       .from("matches")
       .select("receipt_id")
       .eq("org_id", currentOrg.id);
-
-    if (matchesErr) {
-      // Non-blocking: receipts still display even if matches fails
-      console.warn("Error fetching matches:", matchesErr.message);
-      setMatches({});
-      return;
-    }
 
     const matchMap: Record<string, boolean> = {};
     matchesData?.forEach((m: any) => {
@@ -97,10 +90,8 @@ const Receipts = () => {
   const resolveReceiptImageUrl = (imageUrl: string) => {
     const trimmed = imageUrl.trim();
 
-    // If it's already a full URL, just use it
     if (/^https?:\/\//i.test(trimmed)) return trimmed;
 
-    // Build public URL from bucket path
     let path = trimmed;
     if (path.startsWith(`${BUCKET}/`)) path = path.slice(BUCKET.length + 1);
     if (path.startsWith(`/`)) path = path.slice(1);
@@ -128,7 +119,6 @@ const Receipts = () => {
   };
 
   const handleDelete = async (id: string) => {
-    // Extra safety: staff should never delete even if they somehow see/click it
     if (!canManage) {
       toast({
         title: "Not allowed",
@@ -140,7 +130,6 @@ const Receipts = () => {
 
     if (!confirm("Are you sure you want to delete this receipt?")) return;
 
-    // Delete matches first (admin-only after RLS, so this will error for staff anyway)
     const { error: matchDelErr } = await supabase.from("matches").delete().match({ receipt_id: id });
     if (matchDelErr) {
       toast({
@@ -164,18 +153,6 @@ const Receipts = () => {
 
     toast({ title: "Receipt deleted" });
     fetchReceipts();
-  };
-
-  const handleEdit = (receipt: Receipt) => {
-    if (!canManage) {
-      toast({
-        title: "Not allowed",
-        description: "Staff cannot edit receipts. Contact an admin/owner.",
-        variant: "destructive",
-      });
-      return;
-    }
-    setEditingReceipt(receipt);
   };
 
   const getReceiptStatus = (receipt: Receipt) => {
@@ -298,46 +275,45 @@ const Receipts = () => {
                           </TableCell>
                           <TableCell className="max-w-xs truncate">{receipt.notes || "-"}</TableCell>
                           <TableCell>
-                            <div className="flex gap-1">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleOpenImage(receipt.image_url)}
-                                title="Open image"
-                              >
-                                <ExternalLink className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleMatchNow(receipt.id)}
-                                title="Match now"
-                              >
-                                <LinkIcon className="h-4 w-4" />
-                              </Button>
-
-                              {/* Admin/Owner only */}
-                              {canManage && (
-                                <>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => handleEdit(receipt)}
-                                    title="Edit"
-                                  >
-                                    <Pencil className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => handleDelete(receipt.id)}
-                                    title="Delete"
-                                  >
-                                    <Trash2 className="h-4 w-4 text-destructive" />
-                                  </Button>
-                                </>
-                              )}
-                            </div>
+                            {/* STAFF: no action buttons at all */}
+                            {!canManage ? (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            ) : (
+                              <div className="flex gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleOpenImage(receipt.image_url)}
+                                  title="Open image"
+                                >
+                                  <ExternalLink className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleMatchNow(receipt.id)}
+                                  title="Match now"
+                                >
+                                  <LinkIcon className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => setEditingReceipt(receipt)}
+                                  title="Edit"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleDelete(receipt.id)}
+                                  title="Delete"
+                                >
+                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                </Button>
+                              </div>
+                            )}
                           </TableCell>
                         </TableRow>
                       );
