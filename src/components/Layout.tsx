@@ -1,4 +1,4 @@
-import { ReactNode } from "react";
+import { ReactNode, useMemo } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useOrg } from "@/contexts/OrgContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -11,31 +11,51 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { LayoutDashboard, Receipt, CreditCard, FileText, Settings, LogOut, Building2, Menu, Users, ScrollText } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
+import {
+  LayoutDashboard,
+  Receipt,
+  CreditCard,
+  FileText,
+  Settings,
+  LogOut,
+  Building2,
+  Menu,
+  Users,
+  ScrollText,
+} from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
 const Layout = ({ children }: { children: ReactNode }) => {
   const { currentOrg, orgs, switchOrg, user, orgRole } = useOrg();
   const navigate = useNavigate();
   const location = useLocation();
-  const { toast } = useToast();
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     navigate("/auth");
   };
 
-  const navItems = [
-    { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
-    { icon: Receipt, label: "Receipts", path: "/receipts" },
-    { icon: CreditCard, label: "Transactions", path: "/transactions" },
-    { icon: FileText, label: "Reports", path: "/reports" },
-    { icon: ScrollText, label: "Rules", path: "/rules" },
-    { icon: CreditCard, label: "Square", path: "/square" },
-    { icon: Users, label: "Team", path: "/team" },
-    { icon: Settings, label: "Settings", path: "/settings" },
-  ];
+  const allNavItems = useMemo(
+    () => [
+      { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
+      { icon: Receipt, label: "Receipts", path: "/receipts" },
+      { icon: CreditCard, label: "Transactions", path: "/transactions" },
+      { icon: FileText, label: "Reports", path: "/reports" },
+      { icon: ScrollText, label: "Rules", path: "/rules" },
+      { icon: CreditCard, label: "Square", path: "/square" },
+      { icon: Users, label: "Team", path: "/team" },
+      { icon: Settings, label: "Settings", path: "/settings" },
+    ],
+    []
+  );
+
+  // Staff should only see what they can access
+  const navItems = useMemo(() => {
+    if (orgRole === "staff") {
+      return allNavItems.filter((i) => i.path === "/receipts" || i.path === "/settings");
+    }
+    return allNavItems;
+  }, [orgRole, allNavItems]);
 
   const NavLinks = () => (
     <>
@@ -43,10 +63,7 @@ const Layout = ({ children }: { children: ReactNode }) => {
         const isActive = location.pathname === item.path;
         return (
           <Link key={item.path} to={item.path}>
-            <Button
-              variant={isActive ? "default" : "ghost"}
-              className="w-full justify-start"
-            >
+            <Button variant={isActive ? "default" : "ghost"} className="w-full justify-start">
               <item.icon className="mr-2 h-4 w-4" />
               {item.label}
             </Button>
@@ -60,7 +77,7 @@ const Layout = ({ children }: { children: ReactNode }) => {
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="border-b bg-card">
-        <div className="flex h-16 items-center px-4 gap-4">
+        <div className="flex h-16 items-center px-3 sm:px-4 gap-3 sm:gap-4">
           <Sheet>
             <SheetTrigger asChild className="lg:hidden">
               <Button variant="ghost" size="icon">
@@ -75,8 +92,8 @@ const Layout = ({ children }: { children: ReactNode }) => {
           </Sheet>
 
           <h2 className="text-xl font-bold">Kosmos</h2>
-          
-          <div className="ml-auto flex items-center gap-4">
+
+          <div className="ml-auto flex items-center gap-3 sm:gap-4">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" className="gap-2">
@@ -132,7 +149,9 @@ const Layout = ({ children }: { children: ReactNode }) => {
         </aside>
 
         {/* Main Content */}
-        <main className="flex-1 p-6">{children}</main>
+        <main className="flex-1 p-3 sm:p-6">
+          <div className="mx-auto w-full max-w-screen-xl">{children}</div>
+        </main>
       </div>
     </div>
   );
