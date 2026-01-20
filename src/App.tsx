@@ -32,13 +32,14 @@ const App = () => (
           <Sonner />
           <HashRouter>
             <Routes>
+              {/* Leave this as-is if you want. Staff will still get kicked to /receipts by ProtectedRoute. */}
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
               {/* PUBLIC */}
               <Route path="/auth" element={<Auth />} />
               <Route path="/reset-password" element={<ResetPassword />} />
 
-              {/* ✅ IMPORTANT: Invite accept must be PUBLIC (no ProtectedRoute) */}
+              {/* ✅ Invite accept must be PUBLIC (no ProtectedRoute) */}
               <Route path="/accept-invite" element={<AcceptInvite />} />
 
               {/* PROTECTED */}
