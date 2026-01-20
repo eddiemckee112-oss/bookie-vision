@@ -266,8 +266,9 @@ const Receipts = () => {
               </Select>
             </div>
 
-            <div className="overflow-x-auto">
-              <Table>
+            {/* ✅ Mobile-friendly table wrapper (prevents whole page from shrinking) */}
+            <div className="relative -mx-3 sm:mx-0 overflow-x-auto">
+              <Table className="min-w-[720px] sm:min-w-0">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Date</TableHead>
@@ -394,4 +395,3 @@ const Receipts = () => {
 };
 
 export default Receipts;
-
