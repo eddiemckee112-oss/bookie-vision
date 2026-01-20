@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useOrg } from "@/contexts/OrgContext";
@@ -11,9 +11,25 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { UserPlus, Trash2, Copy, XCircle } from "lucide-react";
+import { UserPlus, Trash2, Copy } from "lucide-react";
 import { emailSchema } from "@/lib/validations";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface TeamMember {
   id: string;
@@ -23,14 +39,18 @@ interface TeamMember {
   created_at: string;
 }
 
-interface PendingInvite {
-  id: string;
-  email: string;
-  role: "admin" | "staff" | "owner";
-  status: string;
-  token: string | null;
-  created_at: string;
-}
+type AddOrgUserResponse = {
+  success: boolean;
+  error?: string;
+  details?: string;
+  created_user?: boolean;
+  already_member?: boolean;
+  email?: string;
+  user_id?: string;
+  role?: "staff" | "admin";
+  temp_password?: string | null;
+  note?: string;
+};
 
 const Team = () => {
   const { currentOrg, loading: orgLoading, orgRole, user } = useOrg();
@@ -38,20 +58,21 @@ const Team = () => {
   const { toast } = useToast();
 
   const [members, setMembers] = useState<TeamMember[]>([]);
-  const [invites, setInvites] = useState<PendingInvite[]>([]);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"staff" | "admin">("staff");
-  const [inviteLoading, setInviteLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  // fallback dialog (optional)
-  const [showInviteLink, setShowInviteLink] = useState(false);
-  const [inviteLink, setInviteLink] = useState("");
+  // Temp password dialog
+  const [showTemp, setShowTemp] = useState(false);
+  const [tempEmail, setTempEmail] = useState("");
+  const [tempPassword, setTempPassword] = useState("");
 
-  const canManage = orgRole === "owner" || orgRole === "admin";
-  const isOwner = orgRole === "owner";
+  // Remove confirm dialog
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [pendingRemove, setPendingRemove] = useState<{ memberId: string; memberUserId: string; email: string } | null>(null);
 
-  // IMPORTANT: GitHub Pages base for this app
-  const APP_BASE_URL = `${window.location.origin}/bookie-vision`;
+  const canManage = useMemo(() => orgRole === "owner" || orgRole === "admin", [orgRole]);
+  const isOwner = useMemo(() => orgRole === "owner", [orgRole]);
 
   useEffect(() => {
     if (orgLoading) return;
@@ -60,7 +81,6 @@ const Team = () => {
       return;
     }
     fetchMembers();
-    fetchInvites();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentOrg?.id, orgLoading]);
 
@@ -74,11 +94,7 @@ const Team = () => {
       .order("created_at", { ascending: true });
 
     if (error) {
-      toast({
-        title: "Error",
-        description: "Failed to load team members",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: "Failed to load team members", variant: "destructive" });
       return;
     }
 
@@ -93,109 +109,102 @@ const Team = () => {
     );
   };
 
-  const fetchInvites = async () => {
-    if (!currentOrg) return;
-
-    const { data, error } = await supabase
-      .from("org_invites")
-      .select("id, email, role, status, created_at, token")
-      .eq("org_id", currentOrg.id)
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      console.error("Error fetching invites:", error);
-      return;
-    }
-
-    // ✅ Keep local state clean: hide revoked invites (and any other non-pending, if you want only active)
-    // If you only want to hide revoked but keep accepted, change the filter below.
-    setInvites((data || []).filter((i) => i.status !== "revoked"));
-  };
-
-  const sendInvite = async (e: React.FormEvent) => {
+  const addEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentOrg || !canManage) return;
 
-    setInviteLoading(true);
+    setLoading(true);
     try {
       const validatedEmail = emailSchema.parse(inviteEmail);
 
-      const { data, error } = await supabase.functions.invoke("send-org-invite", {
+      const { data, error } = await supabase.functions.invoke<AddOrgUserResponse>("add-org-user", {
         body: {
           orgId: currentOrg.id,
           email: validatedEmail,
           role: inviteRole,
-          invitedBy: user?.id ?? null,
-          // ✅ THIS is the correct base for GitHub Pages app
-          origin: APP_BASE_URL,
         },
       });
 
       if (error) throw new Error(error.message || "Edge Function failed");
-      if (!data?.success) throw new Error(data?.error || data?.details || "Failed to send invite email");
+      if (!data?.success) throw new Error(data?.error || data?.details || "Failed to add employee");
 
-      toast({
-        title: "Invite sent!",
-        description: `Invite email sent to ${validatedEmail}`,
-      });
-
-      // Optional: store fallback link if you want it
-      if (data?.invite_token) {
-        setInviteLink(`${APP_BASE_URL}/#/accept-invite?token=${data.invite_token}`);
-        setShowInviteLink(false);
+      // ✅ If we created a new user, show temp password once
+      if (data.created_user && data.temp_password) {
+        setTempEmail(validatedEmail);
+        setTempPassword(data.temp_password);
+        setShowTemp(true);
+        toast({
+          title: "Employee added!",
+          description: "Temp password generated. Copy it and send it to them.",
+        });
       } else {
-        setInviteLink("");
-        setShowInviteLink(false);
+        // Existing user case
+        toast({
+          title: "Employee added!",
+          description: "This email already has an account. They can log in normally. If they forgot password, use Password Reset.",
+        });
       }
 
       setInviteEmail("");
       setInviteRole("staff");
-      fetchInvites();
+      await fetchMembers();
     } catch (err: any) {
       toast({
-        title: "Invite failed",
-        description: err.message || "Failed to send invite",
+        title: "Add employee failed",
+        description: err.message || "Failed",
         variant: "destructive",
       });
     } finally {
-      setInviteLoading(false);
+      setLoading(false);
     }
   };
 
-  const copyInviteLink = (token: string | null) => {
-    if (!token) {
-      toast({
-        title: "No token found",
-        description: "This invite is missing a token.",
-        variant: "destructive",
-      });
+  const requestRemoveMember = (memberId: string, memberUserId: string, email: string) => {
+    setPendingRemove({ memberId, memberUserId, email });
+    setConfirmOpen(true);
+  };
+
+  const removeMember = async () => {
+    if (!pendingRemove || !currentOrg) return;
+
+    const { memberId, memberUserId } = pendingRemove;
+
+    // Owner-only removal (matches your previous logic)
+    if (!isOwner) {
+      toast({ title: "Permission denied", description: "Only owners can remove members", variant: "destructive" });
+      setConfirmOpen(false);
+      setPendingRemove(null);
       return;
     }
 
-    const link = `${APP_BASE_URL}/#/accept-invite?token=${token}`;
-    navigator.clipboard.writeText(link);
-    toast({ title: "Link copied!", description: "Invite link copied to clipboard" });
-  };
+    if (memberUserId === user?.id) {
+      toast({ title: "Cannot remove yourself", description: "You cannot remove yourself from the organization", variant: "destructive" });
+      setConfirmOpen(false);
+      setPendingRemove(null);
+      return;
+    }
 
-  // ✅ CHANGE: revoke = delete the invite row so it disappears completely
-  const revokeInvite = async (inviteId: string) => {
-    if (!canManage) return;
-
-    const { error } = await supabase.from("org_invites").delete().eq("id", inviteId);
+    const { error } = await supabase
+      .from("org_users")
+      .delete()
+      .eq("id", memberId)
+      .eq("org_id", currentOrg.id);
 
     if (error) {
-      toast({ title: "Error", description: "Failed to delete invite", variant: "destructive" });
+      toast({ title: "Error", description: "Failed to remove member", variant: "destructive" });
+      setConfirmOpen(false);
+      setPendingRemove(null);
       return;
     }
 
-    // ✅ instantly remove from UI without waiting for refetch
-    setInvites((prev) => prev.filter((i) => i.id !== inviteId));
-
-    toast({ title: "Invite deleted" });
+    toast({ title: "Member removed" });
+    setConfirmOpen(false);
+    setPendingRemove(null);
+    fetchMembers();
   };
 
   const updateMemberRole = async (memberId: string, memberUserId: string, newRole: "admin" | "staff") => {
-    if (!canManage) return;
+    if (!canManage || !currentOrg) return;
 
     const member = members.find((m) => m.id === memberId);
     if (!member) return;
@@ -214,7 +223,7 @@ const Team = () => {
       .from("org_users")
       .update({ role: newRole })
       .eq("id", memberId)
-      .eq("org_id", currentOrg?.id);
+      .eq("org_id", currentOrg.id);
 
     if (error) {
       toast({ title: "Error", description: "Failed to update role", variant: "destructive" });
@@ -222,28 +231,6 @@ const Team = () => {
     }
 
     toast({ title: "Role updated" });
-    fetchMembers();
-  };
-
-  const removeMember = async (memberId: string, memberUserId: string) => {
-    if (!isOwner) {
-      toast({ title: "Permission denied", description: "Only owners can remove members", variant: "destructive" });
-      return;
-    }
-
-    if (memberUserId === user?.id) {
-      toast({ title: "Cannot remove yourself", description: "You cannot remove yourself from the organization", variant: "destructive" });
-      return;
-    }
-
-    const { error } = await supabase.from("org_users").delete().eq("id", memberId).eq("org_id", currentOrg?.id);
-
-    if (error) {
-      toast({ title: "Error", description: "Failed to remove member", variant: "destructive" });
-      return;
-    }
-
-    toast({ title: "Member removed" });
     fetchMembers();
   };
 
@@ -262,7 +249,7 @@ const Team = () => {
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold">Team Management</h1>
-          <p className="text-muted-foreground">Manage members and invitations for {currentOrg?.name}</p>
+          <p className="text-muted-foreground">Add/remove employees for {currentOrg?.name}</p>
         </div>
 
         <Card>
@@ -308,7 +295,12 @@ const Team = () => {
                     {canManage && (
                       <TableCell className="text-right">
                         {isOwner && member.role !== "owner" && member.user_id !== user?.id && (
-                          <Button variant="ghost" size="icon" onClick={() => removeMember(member.id, member.user_id)}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => requestRemoveMember(member.id, member.user_id, member.email)}
+                            title="Remove member"
+                          >
                             <Trash2 className="h-4 w-4 text-destructive" />
                           </Button>
                         )}
@@ -321,91 +313,21 @@ const Team = () => {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Pending Invites</CardTitle>
-            <CardDescription>Invitations waiting to be accepted</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {invites.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No pending invites</p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Role</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Invited</TableHead>
-                    {canManage && <TableHead className="text-right">Actions</TableHead>}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {invites.map((invite) => (
-                    <TableRow key={invite.id}>
-                      <TableCell>{invite.email}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{invite.role}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={
-                            invite.status === "pending" ? "default" : invite.status === "accepted" ? "secondary" : "destructive"
-                          }
-                        >
-                          {invite.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>{new Date(invite.created_at).toLocaleDateString()}</TableCell>
-                      {canManage && (
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-2">
-                            {invite.status === "pending" && (
-                              <>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => copyInviteLink(invite.token)}
-                                  title="Copy invite link (fallback)"
-                                >
-                                  <Copy className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => revokeInvite(invite.id)}
-                                  title="Delete invite"
-                                >
-                                  <XCircle className="h-4 w-4 text-destructive" />
-                                </Button>
-                              </>
-                            )}
-                          </div>
-                        </TableCell>
-                      )}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-
         {canManage && (
           <Card>
             <CardHeader>
-              <CardTitle>Invite New Member</CardTitle>
-              <CardDescription>Send an invitation to join your organization</CardDescription>
+              <CardTitle>Add Employee</CardTitle>
+              <CardDescription>Creates their account (if needed) and adds them to this company</CardDescription>
             </CardHeader>
             <CardContent>
-              <form onSubmit={sendInvite} className="space-y-4">
+              <form onSubmit={addEmployee} className="space-y-4">
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="email">Email Address</Label>
                     <Input
                       id="email"
                       type="email"
-                      placeholder="colleague@example.com"
+                      placeholder="employee@kosmos.com"
                       value={inviteEmail}
                       onChange={(e) => setInviteEmail(e.target.value)}
                       required
@@ -424,36 +346,67 @@ const Team = () => {
                     </Select>
                   </div>
                 </div>
-                <Button type="submit" disabled={inviteLoading}>
+                <Button type="submit" disabled={loading}>
                   <UserPlus className="mr-2 h-4 w-4" />
-                  {inviteLoading ? "Sending invite..." : "Send Email Invite"}
+                  {loading ? "Adding..." : "Add Employee"}
                 </Button>
               </form>
             </CardContent>
           </Card>
         )}
 
-        <Dialog open={showInviteLink} onOpenChange={setShowInviteLink}>
+        {/* Temp password dialog */}
+        <Dialog open={showTemp} onOpenChange={setShowTemp}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Invitation Link Created</DialogTitle>
-              <DialogDescription>Backup link (only if needed). Normally invites are sent by email now.</DialogDescription>
+              <DialogTitle>Employee Temp Password</DialogTitle>
+              <DialogDescription>
+                Copy this and send it to them. They can log in and change it right away.
+              </DialogDescription>
             </DialogHeader>
-            <div className="space-y-4">
-              <div className="p-3 bg-muted rounded-md break-all text-sm">{inviteLink}</div>
+
+            <div className="space-y-3">
+              <div className="text-sm">
+                <div className="font-medium">Email</div>
+                <div className="p-2 rounded bg-muted break-all">{tempEmail}</div>
+              </div>
+
+              <div className="text-sm">
+                <div className="font-medium">Temp Password</div>
+                <div className="p-2 rounded bg-muted break-all">{tempPassword}</div>
+              </div>
+
               <Button
-                onClick={() => {
-                  navigator.clipboard.writeText(inviteLink);
-                  toast({ title: "Copied!", description: "Invite link copied to clipboard" });
-                }}
                 className="w-full"
+                onClick={() => {
+                  navigator.clipboard.writeText(`Email: ${tempEmail}\nPassword: ${tempPassword}`);
+                  toast({ title: "Copied", description: "Login details copied to clipboard" });
+                }}
               >
                 <Copy className="mr-2 h-4 w-4" />
-                Copy to Clipboard
+                Copy Login Details
               </Button>
             </div>
           </DialogContent>
         </Dialog>
+
+        {/* Confirm remove */}
+        <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Remove employee?</AlertDialogTitle>
+              <AlertDialogDescription>
+                {pendingRemove ? `Remove ${pendingRemove.email} from this company?` : "Remove this user?"}
+                <br />
+                This only removes them from this company — it does not delete their account.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setPendingRemove(null)}>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={removeMember}>Yes, remove</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </Layout>
   );
