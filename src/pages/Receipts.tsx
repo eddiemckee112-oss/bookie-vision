@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useOrg } from "@/contexts/OrgContext";
@@ -29,7 +29,7 @@ interface Receipt {
 const BUCKET = "receipts-warm";
 
 const Receipts = () => {
-  const { currentOrg, loading: orgLoading } = useOrg();
+  const { currentOrg, loading: orgLoading, orgRole } = useOrg();
   const navigate = useNavigate();
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [matches, setMatches] = useState<Record<string, boolean>>({});
@@ -38,6 +38,8 @@ const Receipts = () => {
   const [editingReceipt, setEditingReceipt] = useState<Receipt | null>(null);
   const { toast } = useToast();
 
+  const canManage = useMemo(() => orgRole === "owner" || orgRole === "admin", [orgRole]);
+
   useEffect(() => {
     if (orgLoading) return;
     if (!currentOrg) {
@@ -45,7 +47,8 @@ const Receipts = () => {
       return;
     }
     fetchReceipts();
-  }, [currentOrg, orgLoading, navigate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentOrg?.id, orgLoading]);
 
   const fetchReceipts = async () => {
     if (!currentOrg) return;
@@ -67,13 +70,20 @@ const Receipts = () => {
 
     setReceipts(receiptsData || []);
 
-    const { data: matchesData } = await supabase
+    const { data: matchesData, error: matchesErr } = await supabase
       .from("matches")
       .select("receipt_id")
       .eq("org_id", currentOrg.id);
 
+    if (matchesErr) {
+      // Non-blocking: receipts still display even if matches fails
+      console.warn("Error fetching matches:", matchesErr.message);
+      setMatches({});
+      return;
+    }
+
     const matchMap: Record<string, boolean> = {};
-    matchesData?.forEach((m) => {
+    matchesData?.forEach((m: any) => {
       matchMap[m.receipt_id] = true;
     });
     setMatches(matchMap);
@@ -87,12 +97,10 @@ const Receipts = () => {
   const resolveReceiptImageUrl = (imageUrl: string) => {
     const trimmed = imageUrl.trim();
 
-    // ✅ If it's already a full URL, just use it (old app behavior)
+    // If it's already a full URL, just use it
     if (/^https?:\/\//i.test(trimmed)) return trimmed;
 
-    // ✅ If it's a storage-style path, build public URL properly
-    // Sometimes people accidentally store "receipts-warm/xxx.jpg" as the path.
-    // getPublicUrl expects the path INSIDE the bucket, so strip bucket prefix if present.
+    // Build public URL from bucket path
     let path = trimmed;
     if (path.startsWith(`${BUCKET}/`)) path = path.slice(BUCKET.length + 1);
     if (path.startsWith(`/`)) path = path.slice(1);
@@ -120,15 +128,34 @@ const Receipts = () => {
   };
 
   const handleDelete = async (id: string) => {
+    // Extra safety: staff should never delete even if they somehow see/click it
+    if (!canManage) {
+      toast({
+        title: "Not allowed",
+        description: "Staff cannot delete receipts. Contact an admin/owner.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (!confirm("Are you sure you want to delete this receipt?")) return;
 
-    await supabase.from("matches").delete().match({ receipt_id: id });
+    // Delete matches first (admin-only after RLS, so this will error for staff anyway)
+    const { error: matchDelErr } = await supabase.from("matches").delete().match({ receipt_id: id });
+    if (matchDelErr) {
+      toast({
+        title: "Error deleting receipt links",
+        description: matchDelErr.message,
+        variant: "destructive",
+      });
+      return;
+    }
 
     const { error } = await supabase.from("receipts").delete().eq("id", id);
 
     if (error) {
       toast({
-        title: "Error deleting receipt",
+        title: "Delete blocked",
         description: error.message,
         variant: "destructive",
       });
@@ -137,6 +164,18 @@ const Receipts = () => {
 
     toast({ title: "Receipt deleted" });
     fetchReceipts();
+  };
+
+  const handleEdit = (receipt: Receipt) => {
+    if (!canManage) {
+      toast({
+        title: "Not allowed",
+        description: "Staff cannot edit receipts. Contact an admin/owner.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setEditingReceipt(receipt);
   };
 
   const getReceiptStatus = (receipt: Receipt) => {
@@ -173,7 +212,7 @@ const Receipts = () => {
       tax: acc.tax + r.tax,
       total: acc.total + r.total,
     }),
-    { count: 0, subtotal: 0, tax: 0, total: 0 },
+    { count: 0, subtotal: 0, tax: 0, total: 0 }
   );
 
   const matchedCount = receipts.filter((r) => r.source?.toLowerCase().includes("cash") || matches[r.id]).length;
@@ -276,22 +315,28 @@ const Receipts = () => {
                               >
                                 <LinkIcon className="h-4 w-4" />
                               </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => setEditingReceipt(receipt)}
-                                title="Edit"
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleDelete(receipt.id)}
-                                title="Delete"
-                              >
-                                <Trash2 className="h-4 w-4 text-destructive" />
-                              </Button>
+
+                              {/* Admin/Owner only */}
+                              {canManage && (
+                                <>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleEdit(receipt)}
+                                    title="Edit"
+                                  >
+                                    <Pencil className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleDelete(receipt.id)}
+                                    title="Delete"
+                                  >
+                                    <Trash2 className="h-4 w-4 text-destructive" />
+                                  </Button>
+                                </>
+                              )}
                             </div>
                           </TableCell>
                         </TableRow>
@@ -324,12 +369,15 @@ const Receipts = () => {
         </Card>
       </div>
 
-      <ReceiptEditDialog
-        receipt={editingReceipt}
-        open={!!editingReceipt}
-        onOpenChange={(open) => !open && setEditingReceipt(null)}
-        onSuccess={fetchReceipts}
-      />
+      {/* Only admins/owners can edit */}
+      {canManage && (
+        <ReceiptEditDialog
+          receipt={editingReceipt}
+          open={!!editingReceipt}
+          onOpenChange={(open) => !open && setEditingReceipt(null)}
+          onSuccess={fetchReceipts}
+        />
+      )}
     </Layout>
   );
 };
