@@ -1,18 +1,45 @@
-import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { CheckCircle, XCircle, Loader2 } from "lucide-react";
 
+function getTokenFromHashOrSearch(): string | null {
+  // 1) normal query string (rare for hash router but safe)
+  const sp = new URLSearchParams(window.location.search);
+  const fromSearch = sp.get("token");
+  if (fromSearch) return fromSearch;
+
+  // 2) hash router query inside the hash
+  // examples:
+  //  "#/accept-invite?token=abc"
+  //  "#/accept-invite?token=abc&x=y"
+  const hash = window.location.hash || "";
+  const idx = hash.indexOf("?");
+  if (idx === -1) return null;
+
+  const qs = hash.slice(idx + 1); // everything after '?'
+  const hp = new URLSearchParams(qs);
+  return hp.get("token");
+}
+
+function cleanInviteUrl() {
+  // remove token from the URL so refresh doesn't re-run a stale token
+  const base = `${window.location.origin}${window.location.pathname}`;
+  window.history.replaceState(null, "", `${base}#/accept-invite`);
+}
+
 const AcceptInvite = () => {
-  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  // ✅ token from URL OR fallback from localStorage (important for email-invite + auth redirects)
-  const tokenFromUrl = searchParams.get("token");
+  const tokenFromUrl = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    return getTokenFromHashOrSearch();
+  }, []);
+
   const tokenFromStorage =
     typeof window !== "undefined" ? localStorage.getItem("pendingInviteToken") : null;
 
@@ -21,7 +48,6 @@ const AcceptInvite = () => {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<"checking" | "success" | "error" | "needs-auth">("checking");
   const [message, setMessage] = useState("");
-  const [orgName, setOrgName] = useState("");
 
   useEffect(() => {
     checkInviteAndAccept();
@@ -36,25 +62,27 @@ const AcceptInvite = () => {
       return;
     }
 
+    // If token came from URL, clean it immediately
+    // (prevents accidental reuse on refresh)
+    if (tokenFromUrl) cleanInviteUrl();
+
     // Check if user is authenticated
     const {
       data: { user },
     } = await supabase.auth.getUser();
 
     if (!user) {
-      // User needs to sign in first
       setStatus("needs-auth");
       setMessage("Please sign in or create an account to accept this invitation");
       setLoading(false);
 
-      // ✅ Store token for after authentication
+      // store token for after auth
       localStorage.setItem("pendingInviteToken", token);
       return;
     }
 
-    // User is authenticated, proceed with invite acceptance
     try {
-      // ✅ Once logged in, no longer need the stored token
+      // logged in: no longer need the stored token
       localStorage.removeItem("pendingInviteToken");
 
       // Look up the invite
@@ -72,9 +100,7 @@ const AcceptInvite = () => {
         return;
       }
 
-      setOrgName(invite.orgs?.name || "the organization");
-
-      // ✅ Check if user is already a member (use maybeSingle so it doesn't throw)
+      // Check if already a member
       const { data: existingMember, error: existingErr } = await supabase
         .from("org_users")
         .select("id")
@@ -82,12 +108,9 @@ const AcceptInvite = () => {
         .eq("user_id", user.id)
         .maybeSingle();
 
-      if (existingErr) {
-        throw existingErr;
-      }
+      if (existingErr) throw existingErr;
 
       if (existingMember) {
-        // Already a member, just mark invite as accepted
         await supabase.from("org_invites").update({ status: "accepted" }).eq("id", invite.id);
 
         setStatus("success");
@@ -102,7 +125,7 @@ const AcceptInvite = () => {
       const { error: insertError } = await supabase.from("org_users").insert({
         org_id: invite.org_id,
         user_id: user.id,
-        role: invite.role, // must match your enum values
+        role: invite.role,
       });
 
       if (insertError) throw insertError;
@@ -123,7 +146,6 @@ const AcceptInvite = () => {
       setStatus("success");
       setMessage(`Successfully joined ${invite.orgs?.name || "the organization"}!`);
 
-      // Set this org as active and redirect
       localStorage.setItem("currentOrgId", invite.org_id);
       setTimeout(() => navigate("/dashboard"), 1500);
     } catch (error: any) {
@@ -136,7 +158,6 @@ const AcceptInvite = () => {
   };
 
   const handleSignIn = () => {
-    // Redirect to auth page; token is stored in localStorage
     navigate("/auth");
   };
 
