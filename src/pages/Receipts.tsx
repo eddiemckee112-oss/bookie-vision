@@ -39,6 +39,7 @@ const Receipts = () => {
   const { toast } = useToast();
 
   const canManage = useMemo(() => orgRole === "owner" || orgRole === "admin", [orgRole]);
+  const isStaff = orgRole === "staff";
 
   useEffect(() => {
     if (orgLoading) return;
@@ -70,10 +71,17 @@ const Receipts = () => {
 
     setReceipts(receiptsData || []);
 
-    const { data: matchesData } = await supabase
+    // Keep this exactly the same (status badges)
+    const { data: matchesData, error: matchesErr } = await supabase
       .from("matches")
       .select("receipt_id")
       .eq("org_id", currentOrg.id);
+
+    if (matchesErr) {
+      console.warn("Error fetching matches:", matchesErr.message);
+      setMatches({});
+      return;
+    }
 
     const matchMap: Record<string, boolean> = {};
     matchesData?.forEach((m: any) => {
@@ -83,13 +91,21 @@ const Receipts = () => {
   };
 
   const handleMatchNow = (receiptId: string) => {
+    // Staff should not have transactions access
+    if (isStaff) {
+      toast({
+        title: "Not available",
+        description: "Staff cannot access matching. Contact an admin/owner.",
+        variant: "destructive",
+      });
+      return;
+    }
     sessionStorage.setItem("linkReceipt", receiptId);
     navigate("/transactions");
   };
 
   const resolveReceiptImageUrl = (imageUrl: string) => {
     const trimmed = imageUrl.trim();
-
     if (/^https?:\/\//i.test(trimmed)) return trimmed;
 
     let path = trimmed;
@@ -101,6 +117,9 @@ const Receipts = () => {
   };
 
   const handleOpenImage = (imageUrl: string | null) => {
+    // Staff: hide this action (and block if somehow called)
+    if (isStaff) return;
+
     if (!imageUrl) {
       toast({ title: "No image available", variant: "destructive" });
       return;
@@ -122,7 +141,7 @@ const Receipts = () => {
     if (!canManage) {
       toast({
         title: "Not allowed",
-        description: "Staff cannot delete receipts. Contact an admin/owner.",
+        description: "Only admin/owner can delete receipts.",
         variant: "destructive",
       });
       return;
@@ -153,6 +172,18 @@ const Receipts = () => {
 
     toast({ title: "Receipt deleted" });
     fetchReceipts();
+  };
+
+  const handleEdit = (receipt: Receipt) => {
+    if (!canManage) {
+      toast({
+        title: "Not allowed",
+        description: "Only admin/owner can edit receipts.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setEditingReceipt(receipt);
   };
 
   const getReceiptStatus = (receipt: Receipt) => {
@@ -275,45 +306,50 @@ const Receipts = () => {
                           </TableCell>
                           <TableCell className="max-w-xs truncate">{receipt.notes || "-"}</TableCell>
                           <TableCell>
-                            {/* STAFF: no action buttons at all */}
-                            {!canManage ? (
-                              <span className="text-xs text-muted-foreground">—</span>
-                            ) : (
-                              <div className="flex gap-1">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => handleOpenImage(receipt.image_url)}
-                                  title="Open image"
-                                >
-                                  <ExternalLink className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => handleMatchNow(receipt.id)}
-                                  title="Match now"
-                                >
-                                  <LinkIcon className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => setEditingReceipt(receipt)}
-                                  title="Edit"
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => handleDelete(receipt.id)}
-                                  title="Delete"
-                                >
-                                  <Trash2 className="h-4 w-4 text-destructive" />
-                                </Button>
-                              </div>
-                            )}
+                            <div className="flex gap-1">
+                              {/* Staff: no actions. Admin/Owner: same actions as before */}
+                              {!isStaff && (
+                                <>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleOpenImage(receipt.image_url)}
+                                    title="Open image"
+                                  >
+                                    <ExternalLink className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleMatchNow(receipt.id)}
+                                    title="Match now"
+                                  >
+                                    <LinkIcon className="h-4 w-4" />
+                                  </Button>
+                                </>
+                              )}
+
+                              {canManage && (
+                                <>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleEdit(receipt)}
+                                    title="Edit"
+                                  >
+                                    <Pencil className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleDelete(receipt.id)}
+                                    title="Delete"
+                                  >
+                                    <Trash2 className="h-4 w-4 text-destructive" />
+                                  </Button>
+                                </>
+                              )}
+                            </div>
                           </TableCell>
                         </TableRow>
                       );
@@ -345,7 +381,6 @@ const Receipts = () => {
         </Card>
       </div>
 
-      {/* Only admins/owners can edit */}
       {canManage && (
         <ReceiptEditDialog
           receipt={editingReceipt}
@@ -359,3 +394,4 @@ const Receipts = () => {
 };
 
 export default Receipts;
+
