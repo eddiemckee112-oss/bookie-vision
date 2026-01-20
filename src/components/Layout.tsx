@@ -1,4 +1,4 @@
-import { ReactNode, useMemo } from "react";
+import { ReactNode } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useOrg } from "@/contexts/OrgContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -35,27 +35,16 @@ const Layout = ({ children }: { children: ReactNode }) => {
     navigate("/auth");
   };
 
-  const allNavItems = useMemo(
-    () => [
-      { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
-      { icon: Receipt, label: "Receipts", path: "/receipts" },
-      { icon: CreditCard, label: "Transactions", path: "/transactions" },
-      { icon: FileText, label: "Reports", path: "/reports" },
-      { icon: ScrollText, label: "Rules", path: "/rules" },
-      { icon: CreditCard, label: "Square", path: "/square" },
-      { icon: Users, label: "Team", path: "/team" },
-      { icon: Settings, label: "Settings", path: "/settings" },
-    ],
-    []
-  );
-
-  // Staff should only see what they can access
-  const navItems = useMemo(() => {
-    if (orgRole === "staff") {
-      return allNavItems.filter((i) => i.path === "/receipts" || i.path === "/settings");
-    }
-    return allNavItems;
-  }, [orgRole, allNavItems]);
+  const navItems = [
+    { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
+    { icon: Receipt, label: "Receipts", path: "/receipts" },
+    { icon: CreditCard, label: "Transactions", path: "/transactions" },
+    { icon: FileText, label: "Reports", path: "/reports" },
+    { icon: ScrollText, label: "Rules", path: "/rules" },
+    { icon: CreditCard, label: "Square", path: "/square" },
+    { icon: Users, label: "Team", path: "/team" },
+    { icon: Settings, label: "Settings", path: "/settings" },
+  ];
 
   const NavLinks = () => (
     <>
@@ -74,10 +63,10 @@ const Layout = ({ children }: { children: ReactNode }) => {
   );
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background overflow-x-hidden">
       {/* Header */}
       <header className="border-b bg-card">
-        <div className="flex h-16 items-center px-3 sm:px-4 gap-3 sm:gap-4">
+        <div className="flex h-16 items-center px-4 gap-4">
           <Sheet>
             <SheetTrigger asChild className="lg:hidden">
               <Button variant="ghost" size="icon">
@@ -93,7 +82,7 @@ const Layout = ({ children }: { children: ReactNode }) => {
 
           <h2 className="text-xl font-bold">Kosmos</h2>
 
-          <div className="ml-auto flex items-center gap-3 sm:gap-4">
+          <div className="ml-auto flex items-center gap-4">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" className="gap-2">
@@ -119,7 +108,7 @@ const Layout = ({ children }: { children: ReactNode }) => {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" className="rounded-full">
-                  {user?.email?.[0].toUpperCase()}
+                  {user?.email?.[0]?.toUpperCase() ?? "?"}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
@@ -140,7 +129,7 @@ const Layout = ({ children }: { children: ReactNode }) => {
         </div>
       </header>
 
-      <div className="flex">
+      <div className="flex w-full max-w-full">
         {/* Sidebar - Desktop */}
         <aside className="hidden lg:block w-64 border-r bg-card min-h-[calc(100vh-4rem)]">
           <div className="flex flex-col gap-2 p-4">
@@ -149,9 +138,7 @@ const Layout = ({ children }: { children: ReactNode }) => {
         </aside>
 
         {/* Main Content */}
-        <main className="flex-1 p-3 sm:p-6">
-          <div className="mx-auto w-full max-w-screen-xl">{children}</div>
-        </main>
+        <main className="flex-1 p-4 sm:p-6 max-w-full">{children}</main>
       </div>
     </div>
   );
