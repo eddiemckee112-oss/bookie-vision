@@ -107,7 +107,9 @@ const Team = () => {
       return;
     }
 
-    setInvites(data || []);
+    // ✅ Keep local state clean: hide revoked invites (and any other non-pending, if you want only active)
+    // If you only want to hide revoked but keep accepted, change the filter below.
+    setInvites((data || []).filter((i) => i.status !== "revoked"));
   };
 
   const sendInvite = async (e: React.FormEvent) => {
@@ -175,16 +177,21 @@ const Team = () => {
     toast({ title: "Link copied!", description: "Invite link copied to clipboard" });
   };
 
+  // ✅ CHANGE: revoke = delete the invite row so it disappears completely
   const revokeInvite = async (inviteId: string) => {
-    const { error } = await supabase.from("org_invites").update({ status: "revoked" }).eq("id", inviteId);
+    if (!canManage) return;
+
+    const { error } = await supabase.from("org_invites").delete().eq("id", inviteId);
 
     if (error) {
-      toast({ title: "Error", description: "Failed to revoke invite", variant: "destructive" });
+      toast({ title: "Error", description: "Failed to delete invite", variant: "destructive" });
       return;
     }
 
-    toast({ title: "Invite revoked" });
-    fetchInvites();
+    // ✅ instantly remove from UI without waiting for refetch
+    setInvites((prev) => prev.filter((i) => i.id !== inviteId));
+
+    toast({ title: "Invite deleted" });
   };
 
   const updateMemberRole = async (memberId: string, memberUserId: string, newRole: "admin" | "staff") => {
@@ -355,10 +362,20 @@ const Team = () => {
                           <div className="flex justify-end gap-2">
                             {invite.status === "pending" && (
                               <>
-                                <Button variant="ghost" size="icon" onClick={() => copyInviteLink(invite.token)} title="Copy invite link (fallback)">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => copyInviteLink(invite.token)}
+                                  title="Copy invite link (fallback)"
+                                >
                                   <Copy className="h-4 w-4" />
                                 </Button>
-                                <Button variant="ghost" size="icon" onClick={() => revokeInvite(invite.id)} title="Revoke invite">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => revokeInvite(invite.id)}
+                                  title="Delete invite"
+                                >
                                   <XCircle className="h-4 w-4 text-destructive" />
                                 </Button>
                               </>
