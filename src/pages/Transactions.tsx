@@ -82,9 +82,11 @@ const isEmptyCategory = (cat: string | null) => {
 const PAGE_SIZE = 500;
 
 const Transactions = () => {
-  const { currentOrg, loading: orgLoading } = useOrg();
+  const { currentOrg, loading: orgLoading, orgRole } = useOrg();
   const navigate = useNavigate();
   const { toast } = useToast();
+
+  const canManage = useMemo(() => orgRole === "owner" || orgRole === "admin", [orgRole]);
 
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
@@ -92,6 +94,9 @@ const Transactions = () => {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
+
+  // ✅ NEW: category filter (text match on txn.category)
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
 
   // date filtering
   const [dateMode, setDateMode] = useState<DateMode>("this_month");
@@ -106,22 +111,22 @@ const Transactions = () => {
   const [updatingCategoryId, setUpdatingCategoryId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // ✅ org categories (from DB)
+  // org categories (from DB)
   const [orgCategories, setOrgCategories] = useState<OrgCategory[]>([]);
   const [catLoading, setCatLoading] = useState(false);
   const [showManageCats, setShowManageCats] = useState(false);
   const [newCatName, setNewCatName] = useState("");
   const [catSaving, setCatSaving] = useState(false);
 
-  // ✅ Apply Rules busy
+  // Apply Rules busy
   const [isApplyingRules, setIsApplyingRules] = useState(false);
 
-  // ✅ Accounts + account filter
+  // Accounts + account filter
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [accountsLoading, setAccountsLoading] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string>("all");
 
-  // ✅ Pagination state
+  // Pagination state
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -220,6 +225,15 @@ const Transactions = () => {
   const addCategory = async () => {
     if (!currentOrg) return;
 
+    if (!canManage) {
+      toast({
+        title: "Not allowed",
+        description: "Staff cannot manage categories.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const name = newCatName.trim();
     if (!name) {
       toast({ title: "Category name is required", variant: "destructive" });
@@ -258,6 +272,15 @@ const Transactions = () => {
 
   const deleteCategory = async (catId: string, name: string) => {
     if (!currentOrg) return;
+
+    if (!canManage) {
+      toast({
+        title: "Not allowed",
+        description: "Staff cannot manage categories.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     const ok = window.confirm(
       `Delete category "${name}"?\n\nTransactions will keep their text value, but the category won't show in the dropdown anymore.`,
@@ -346,7 +369,7 @@ const Transactions = () => {
 
     setMatches((matchesData as any) || []);
 
-    const receiptIds = matchesData?.map((m) => m.receipt_id) || [];
+    const receiptIds = matchesData?.map((m: any) => m.receipt_id) || [];
     if (receiptIds.length > 0) {
       const { data: receiptsData, error: receiptsError } = await supabase
         .from("receipts")
@@ -377,6 +400,16 @@ const Transactions = () => {
   const updateCategory = async (txnId: string, newCategory: string | null) => {
     if (!currentOrg) return;
 
+    // Staff read-only on transactions
+    if (!canManage) {
+      toast({
+        title: "Not allowed",
+        description: "Staff cannot edit transactions. Contact an admin/owner.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setUpdatingCategoryId(txnId);
 
     const { error } = await supabase
@@ -403,6 +436,16 @@ const Transactions = () => {
 
   const deleteTransaction = async (txnId: string) => {
     if (!currentOrg) return;
+
+    // Staff read-only on transactions
+    if (!canManage) {
+      toast({
+        title: "Not allowed",
+        description: "Staff cannot delete transactions. Contact an admin/owner.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     const ok = window.confirm("Delete this transaction? This cannot be undone.");
     if (!ok) return;
@@ -467,11 +510,29 @@ const Transactions = () => {
     }
 
     return true;
+  }).filter((t) => {
+    // ✅ NEW: category filter
+    if (categoryFilter === "all") return true;
+
+    // "Uncategorized" bucket
+    if (categoryFilter === "__uncat__") return isEmptyCategory(t.category);
+
+    // Exact match on category string
+    return (t.category ?? "") === categoryFilter;
   });
 
-  // ✅ Apply rules (works again)
+  // Apply rules (works again)
   const applyRules = async () => {
     if (!currentOrg) return;
+
+    if (!canManage) {
+      toast({
+        title: "Not allowed",
+        description: "Staff cannot apply rules. Contact an admin/owner.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     setIsApplyingRules(true);
     try {
@@ -606,7 +667,8 @@ const Transactions = () => {
           </p>
         </div>
 
-        {currentOrg && (
+        {/* Owners/Admin only: import + bank sync */}
+        {currentOrg && canManage && (
           <div className="space-y-4">
             <CSVUploader orgId={currentOrg.id} onUploadComplete={() => fetchTransactions({ reset: true })} />
             <BankSyncSection orgId={currentOrg.id} onSyncComplete={() => fetchTransactions({ reset: true })} />
@@ -620,12 +682,16 @@ const Transactions = () => {
               {catLoading ? " (loading...)" : ""}
             </div>
 
-            <Button variant="outline" onClick={() => setShowManageCats((v) => !v)}>
-              {showManageCats ? "Hide Category Manager" : "Manage Categories"}
-            </Button>
+            {/* Owners/Admin only */}
+            {canManage && (
+              <Button variant="outline" onClick={() => setShowManageCats((v) => !v)}>
+                {showManageCats ? "Hide Category Manager" : "Manage Categories"}
+              </Button>
+            )}
           </div>
 
-          {showManageCats && (
+          {/* Owners/Admin only */}
+          {canManage && showManageCats && (
             <div className="rounded-md border p-4 space-y-3">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <input
@@ -671,7 +737,7 @@ const Transactions = () => {
             </div>
           )}
 
-          {/* ✅ Account filter (minimal, does not change layout style) */}
+          {/* Account filter */}
           <div className="flex items-center gap-2 flex-wrap">
             <div className="text-sm text-muted-foreground">Account:</div>
             <select
@@ -684,6 +750,24 @@ const Transactions = () => {
               {accounts.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* ✅ NEW: Category filter */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="text-sm text-muted-foreground">Category:</div>
+            <select
+              className="h-9 rounded-md border bg-background px-3 text-sm"
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+            >
+              <option value="all">All</option>
+              <option value="__uncat__">Uncategorized</option>
+              {orgCategories.map((c) => (
+                <option key={c.id} value={c.name}>
+                  {c.name}
                 </option>
               ))}
             </select>
@@ -709,14 +793,17 @@ const Transactions = () => {
               Showing <b>{filteredTransactions.length}</b> transactions
             </div>
 
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={autoMatch}>
-                Auto Match
-              </Button>
-              <Button variant="outline" onClick={applyRules} disabled={isApplyingRules}>
-                {isApplyingRules ? "Applying..." : "Apply Rules"}
-              </Button>
-            </div>
+            {/* Owners/Admin only */}
+            {canManage && (
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={autoMatch}>
+                  Auto Match
+                </Button>
+                <Button variant="outline" onClick={applyRules} disabled={isApplyingRules}>
+                  {isApplyingRules ? "Applying..." : "Apply Rules"}
+                </Button>
+              </div>
+            )}
           </div>
 
           <div className="overflow-x-auto">
@@ -744,8 +831,9 @@ const Transactions = () => {
                   </TableRow>
                 ) : (
                   filteredTransactions.map((txn) => {
-                    const matched = isTxnMatched(txn.id);
-                    const receipt = getLinkedReceiptForTxn(txn.id);
+                    const matched = matches.some((m) => m.transaction_id === txn.id);
+                    const m = matches.find((x) => x.transaction_id === txn.id);
+                    const receipt = m ? linkedReceipts[m.receipt_id] || null : null;
 
                     const legacyCategory =
                       txn.category && !categoryNames.includes(txn.category) ? txn.category : null;
@@ -783,7 +871,7 @@ const Transactions = () => {
                           <select
                             className="h-9 w-full rounded-md border bg-background px-3 text-sm"
                             value={txn.category ?? ""}
-                            disabled={updatingCategoryId === txn.id}
+                            disabled={!canManage || updatingCategoryId === txn.id}
                             onChange={(e) => updateCategory(txn.id, e.target.value || null)}
                           >
                             <option value="">Uncategorized</option>
@@ -828,14 +916,17 @@ const Transactions = () => {
                               Upload Receipt
                             </Button>
 
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              onClick={() => deleteTransaction(txn.id)}
-                              disabled={deletingId === txn.id}
-                            >
-                              {deletingId === txn.id ? "Deleting..." : "Delete"}
-                            </Button>
+                            {/* Owners/Admin only */}
+                            {canManage && (
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => deleteTransaction(txn.id)}
+                                disabled={deletingId === txn.id}
+                              >
+                                {deletingId === txn.id ? "Deleting..." : "Delete"}
+                              </Button>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -846,7 +937,7 @@ const Transactions = () => {
             </Table>
           </div>
 
-          {/* ✅ Pagination (minimal UI) */}
+          {/* Pagination */}
           {hasMore && (
             <div className="flex justify-center pt-4">
               <Button
