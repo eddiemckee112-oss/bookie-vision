@@ -1,13 +1,19 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useDropzone } from "react-dropzone";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Upload, Camera, X, Sparkles } from "lucide-react";
+import { Upload, Camera, X, Sparkles, FileUp } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
@@ -25,7 +31,7 @@ interface ReceiptFormData {
   total: string;
   tax: string;
   category: string; // stored as name string for now
-  source: string;   // stored as account name string (matches your current schema)
+  source: string; // stored as account name string (matches your current schema)
   notes: string;
 }
 
@@ -45,6 +51,10 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
   const [preview, setPreview] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+
+  // ✅ NEW: two hidden pickers (camera vs files) for mobile UX
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const categoryNames = useMemo(() => {
     const names = orgCats.map((c) => (c.name || "").trim()).filter(Boolean);
@@ -119,7 +129,14 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
       // Smart mappings to prevent duplicates / junk categories from AI
       // Map “food & beverage / restaurant (food & supplies)” into your real category names
       const map: Array<{ test: (x: string) => boolean; to: string }> = [
-        { test: (x) => x.includes("food") || x.includes("beverage") || x.includes("restaurant (food") || x.includes("supplies"), to: "Food & Supplies" },
+        {
+          test: (x) =>
+            x.includes("food") ||
+            x.includes("beverage") ||
+            x.includes("restaurant (food") ||
+            x.includes("supplies"),
+          to: "Food & Supplies",
+        },
         { test: (x) => x.includes("clean"), to: "Cleaning Supplies" },
         { test: (x) => x.includes("tool") || x.includes("equipment"), to: "Tools & Equipment" },
         { test: (x) => x.includes("repair") || x.includes("maintenance"), to: "Repairs & Maintenance" },
@@ -146,10 +163,8 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
     [categoryNames],
   );
 
-  const onDrop = useCallback((acceptedFiles: File[]) => {
-    const file = acceptedFiles[0];
-    if (!file) return;
-
+  // ✅ centralize file handling so dropzone + camera + file picker behave identically
+  const setFile = useCallback((file: File) => {
     setSelectedFile(file);
 
     if (file.type.startsWith("image/")) {
@@ -161,6 +176,15 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
     }
   }, []);
 
+  const onDrop = useCallback(
+    (acceptedFiles: File[]) => {
+      const file = acceptedFiles[0];
+      if (!file) return;
+      setFile(file);
+    },
+    [setFile],
+  );
+
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
@@ -169,6 +193,18 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
     },
     maxFiles: 1,
   });
+
+  const onPickFromInput = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      setFile(file);
+
+      // allow picking same file twice in a row on iOS
+      e.target.value = "";
+    },
+    [setFile],
+  );
 
   const handleClear = () => {
     setSelectedFile(null);
@@ -307,6 +343,35 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
 
   return (
     <div className="space-y-6">
+      {/* ✅ NEW: Mobile-friendly pickers */}
+      <div className="flex flex-col sm:flex-row gap-2">
+        <input
+          ref={cameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={onPickFromInput}
+        />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,application/pdf"
+          className="hidden"
+          onChange={onPickFromInput}
+        />
+
+        <Button type="button" className="flex-1" onClick={() => cameraInputRef.current?.click()}>
+          <Camera className="mr-2 h-4 w-4" />
+          Take Photo
+        </Button>
+
+        <Button type="button" variant="outline" className="flex-1" onClick={() => fileInputRef.current?.click()}>
+          <FileUp className="mr-2 h-4 w-4" />
+          Choose File
+        </Button>
+      </div>
+
       {/* File Upload */}
       <div className="space-y-4">
         <div
@@ -316,7 +381,11 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
             isDragActive ? "border-primary bg-primary/5" : "border-border hover:border-primary/50",
           )}
         >
-          <input {...getInputProps()} accept="image/*,application/pdf" capture="environment" />
+          {/* ✅ IMPORTANT CHANGE:
+              Remove capture="environment" here so clicking the dropzone doesn't force camera on phones.
+              Camera is now explicit via the Take Photo button above.
+           */}
+          <input {...getInputProps()} accept="image/*,application/pdf" />
 
           {preview ? (
             <div className="space-y-4">
@@ -334,7 +403,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
                 <p className="text-lg font-medium">
                   {isDragActive ? "Drop your receipt here" : "Upload Receipt Image or PDF"}
                 </p>
-                <p className="text-sm text-muted-foreground">Drag & drop, click to browse, or use camera</p>
+                <p className="text-sm text-muted-foreground">Drag & drop, or click to browse</p>
               </div>
             </div>
           )}
@@ -414,10 +483,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
 
         <div className="space-y-2">
           <Label htmlFor="category">Category</Label>
-          <Select
-            value={formData.category}
-            onValueChange={(v) => setFormData((p) => ({ ...p, category: v }))}
-          >
+          <Select value={formData.category} onValueChange={(v) => setFormData((p) => ({ ...p, category: v }))}>
             <SelectTrigger>
               <SelectValue placeholder={catsLoading ? "Loading categories..." : "Choose a category"} />
             </SelectTrigger>
@@ -433,10 +499,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
 
         <div className="space-y-2">
           <Label htmlFor="source">Source</Label>
-          <Select
-            value={formData.source || ""}
-            onValueChange={(v) => setFormData((p) => ({ ...p, source: v }))}
-          >
+          <Select value={formData.source || ""} onValueChange={(v) => setFormData((p) => ({ ...p, source: v }))}>
             <SelectTrigger>
               <SelectValue placeholder={accountsLoading ? "Loading accounts..." : "Choose source"} />
             </SelectTrigger>
