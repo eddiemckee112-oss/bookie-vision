@@ -30,8 +30,8 @@ interface ReceiptFormData {
   receipt_date: Date | undefined;
   total: string;
   tax: string;
-  category: string;
-  source: string;
+  category: string; // stored as name string for now
+  source: string; // stored as account name string (matches your current schema)
   notes: string;
 }
 
@@ -52,17 +52,20 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
   const [isScanning, setIsScanning] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
 
+  // ✅ NEW: two hidden pickers (camera vs files) for mobile UX
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const categoryNames = useMemo(() => {
     const names = orgCats.map((c) => (c.name || "").trim()).filter(Boolean);
     const uniq = Array.from(new Set(names));
+    // Always include Uncategorized first (works with your DB list too)
     if (!uniq.includes("Uncategorized")) uniq.unshift("Uncategorized");
     return uniq;
   }, [orgCats]);
 
   const defaultSource = useMemo(() => {
+    // pick Cash if exists else first account name, else blank
     const cash = accounts.find((a) => a.name?.toLowerCase().includes("cash"));
     return cash?.name || accounts[0]?.name || "";
   }, [accounts]);
@@ -77,6 +80,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
     notes: "",
   });
 
+  // fetch accounts for org -> used for Source dropdown
   useEffect(() => {
     const run = async () => {
       if (!currentOrg) return;
@@ -90,39 +94,71 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
 
       setAccountsLoading(false);
 
-      if (error) return;
+      if (error) {
+        console.error("Failed to fetch accounts:", error);
+        return;
+      }
       setAccounts((data as Account[]) ?? []);
     };
 
     run();
   }, [currentOrg?.id]);
 
+  // set default source when accounts load (only if blank)
   useEffect(() => {
     if (!formData.source && defaultSource) {
       setFormData((p) => ({ ...p, source: defaultSource }));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultSource]);
 
   const normalizeCategory = useCallback(
     (raw: any): string => {
       const list = categoryNames;
       if (!raw || typeof raw !== "string") return "Uncategorized";
+
       const s = raw.trim();
       if (!s) return "Uncategorized";
 
+      // exact match (case-insensitive)
       const exact = list.find((c) => c.toLowerCase() === s.toLowerCase());
       if (exact) return exact;
 
       const lower = s.toLowerCase();
+
+      // Smart mappings to prevent duplicates / junk categories from AI
+      // Map “food & beverage / restaurant (food & supplies)” into your real category names
       const map: Array<{ test: (x: string) => boolean; to: string }> = [
-        { test: (x) => x.includes("food") || x.includes("beverage") || x.includes("restaurant (food") || x.includes("supplies"), to: "Food & Supplies" },
+        {
+          test: (x) =>
+            x.includes("food") ||
+            x.includes("beverage") ||
+            x.includes("restaurant (food") ||
+            x.includes("supplies"),
+          to: "Food & Supplies",
+        },
         { test: (x) => x.includes("clean"), to: "Cleaning Supplies" },
-        { test: (x) => x.includes("tool") || x.includes("equipment"), to: "Tools & Equipment" },
-        { test: (x) => x.includes("repair") || x.includes("maintenance"), to: "Repairs & Maintenance" },
+        {
+          test: (x) => x.includes("tool") || x.includes("equipment"),
+          to: "Tools & Equipment",
+        },
+        {
+          test: (x) => x.includes("repair") || x.includes("maintenance"),
+          to: "Repairs & Maintenance",
+        },
         { test: (x) => x.includes("utilit"), to: "Utilities" },
-        { test: (x) => x.includes("bank fee") || x.includes("interest"), to: "Bank Fees & Interest" },
-        { test: (x) => x.includes("advert") || x.includes("marketing"), to: "Advertising & Marketing" },
-        { test: (x) => x.includes("software") || x.includes("subscription"), to: "Software & Subscriptions" },
+        {
+          test: (x) => x.includes("bank fee") || x.includes("interest"),
+          to: "Bank Fees & Interest",
+        },
+        {
+          test: (x) => x.includes("advert") || x.includes("marketing"),
+          to: "Advertising & Marketing",
+        },
+        {
+          test: (x) => x.includes("software") || x.includes("subscription"),
+          to: "Software & Subscriptions",
+        },
         { test: (x) => x.includes("insur"), to: "Insurance" },
         { test: (x) => x.includes("tax"), to: "Taxes" },
         { test: (x) => x.includes("income") || x.includes("sales"), to: "Sales Income" },
@@ -142,8 +178,10 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
     [categoryNames],
   );
 
+  // ✅ centralize file handling so dropzone + camera + file picker behave identically
   const setFile = useCallback((file: File) => {
     setSelectedFile(file);
+
     if (file.type.startsWith("image/")) {
       const reader = new FileReader();
       reader.onloadend = () => setPreview(reader.result as string);
@@ -153,11 +191,14 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
     }
   }, []);
 
-  const onDrop = useCallback((acceptedFiles: File[]) => {
-    const file = acceptedFiles[0];
-    if (!file) return;
-    setFile(file);
-  }, [setFile]);
+  const onDrop = useCallback(
+    (acceptedFiles: File[]) => {
+      const file = acceptedFiles[0];
+      if (!file) return;
+      setFile(file);
+    },
+    [setFile],
+  );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -173,6 +214,8 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
       const file = e.target.files?.[0];
       if (!file) return;
       setFile(file);
+
+      // allow picking same file twice in a row on iOS
       e.target.value = "";
     },
     [setFile],
@@ -194,6 +237,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
 
   const handleScanWithAI = async () => {
     if (!selectedFile || !currentOrg) return;
+
     setIsScanning(true);
 
     const reader = new FileReader();
@@ -208,9 +252,8 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
             image: base64String,
             hint_vendor: formData.vendor,
             hint_amount: formData.total,
-            hint_date: formData.receipt_date
-              ? format(formData.receipt_date, "yyyy-MM-dd")
-              : null, // 🔧 FIX 1
+            // ✅ FIX #1: send date-only string (no timezone)
+            hint_date: formData.receipt_date ? format(formData.receipt_date, "yyyy-MM-dd") : null,
             source: formData.source,
           },
         });
@@ -223,11 +266,10 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
         setFormData((prev) => ({
           ...prev,
           vendor: prev.vendor || receipt.vendor || "",
+          // ✅ FIX #2: parse "YYYY-MM-DD" safely (avoid UTC rollback)
           receipt_date:
             prev.receipt_date ||
-            (receipt.date
-              ? new Date(receipt.date + "T12:00:00")
-              : prev.receipt_date), // 🔧 FIX 2
+            (receipt.date ? new Date(receipt.date + "T12:00:00") : prev.receipt_date),
           total: prev.total || (receipt.total != null ? String(receipt.total) : prev.total),
           tax: prev.tax || (receipt.tax != null ? String(receipt.tax) : prev.tax),
           category: prev.category && prev.category !== "Uncategorized" ? prev.category : aiCategory,
@@ -282,9 +324,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
         const fileExt = selectedFile.name.split(".").pop();
         const filePath = `${currentOrg.id}/${timestamp}.${fileExt}`;
 
-        const { error: uploadError } = await supabase.storage
-          .from(BUCKET)
-          .upload(filePath, selectedFile);
+        const { error: uploadError } = await supabase.storage.from(BUCKET).upload(filePath, selectedFile);
         if (!uploadError) imageUrl = filePath;
       }
 
@@ -321,6 +361,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
 
   return (
     <div className="space-y-6">
+      {/* ✅ NEW: Mobile-friendly pickers */}
       <div className="flex flex-col sm:flex-row gap-2">
         <input
           ref={cameraInputRef}
@@ -349,6 +390,7 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
         </Button>
       </div>
 
+      {/* File Upload */}
       <div className="space-y-4">
         <div
           {...getRootProps()}
@@ -357,6 +399,10 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
             isDragActive ? "border-primary bg-primary/5" : "border-border hover:border-primary/50",
           )}
         >
+          {/* ✅ IMPORTANT CHANGE:
+              Remove capture="environment" here so clicking the dropzone doesn't force camera on phones.
+              Camera is now explicit via the Take Photo button above.
+           */}
           <input {...getInputProps()} accept="image/*,application/pdf" />
 
           {preview ? (
@@ -394,8 +440,114 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
         )}
       </div>
 
+      {/* Form Fields */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* form fields unchanged */}
+        <div className="space-y-2">
+          <Label htmlFor="vendor">Vendor *</Label>
+          <Input
+            id="vendor"
+            value={formData.vendor}
+            onChange={(e) => setFormData((p) => ({ ...p, vendor: e.target.value }))}
+            placeholder="Enter vendor name"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label>Date *</Label>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                className={cn("w-full justify-start text-left font-normal", !formData.receipt_date && "text-muted-foreground")}
+              >
+                {formData.receipt_date ? format(formData.receipt_date, "PPP") : "Pick a date"}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="single"
+                selected={formData.receipt_date}
+                onSelect={(d) => setFormData((p) => ({ ...p, receipt_date: d }))}
+                initialFocus
+                className="pointer-events-auto"
+              />
+            </PopoverContent>
+          </Popover>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="total">Total *</Label>
+          <Input
+            id="total"
+            type="number"
+            step="0.01"
+            value={formData.total}
+            onChange={(e) => setFormData((p) => ({ ...p, total: e.target.value }))}
+            placeholder="0.00"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="tax">Tax</Label>
+          <Input
+            id="tax"
+            type="number"
+            step="0.01"
+            value={formData.tax}
+            onChange={(e) => setFormData((p) => ({ ...p, tax: e.target.value }))}
+            placeholder="0.00"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="category">Category</Label>
+          <Select value={formData.category} onValueChange={(v) => setFormData((p) => ({ ...p, category: v }))}>
+            <SelectTrigger>
+              <SelectValue placeholder={catsLoading ? "Loading categories..." : "Choose a category"} />
+            </SelectTrigger>
+            <SelectContent>
+              {categoryNames.map((cat) => (
+                <SelectItem key={cat} value={cat}>
+                  {cat}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="source">Source</Label>
+          <Select value={formData.source || ""} onValueChange={(v) => setFormData((p) => ({ ...p, source: v }))}>
+            <SelectTrigger>
+              <SelectValue placeholder={accountsLoading ? "Loading accounts..." : "Choose source"} />
+            </SelectTrigger>
+            <SelectContent>
+              {accounts.length === 0 ? (
+                <SelectItem value="Cash">Cash</SelectItem>
+              ) : (
+                accounts
+                  .map((a) => (a.name || "").trim())
+                  .filter(Boolean)
+                  .map((name) => (
+                    <SelectItem key={name} value={name}>
+                      {name}
+                    </SelectItem>
+                  ))
+              )}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2 md:col-span-2">
+          <Label htmlFor="notes">Notes</Label>
+          <Textarea
+            id="notes"
+            value={formData.notes}
+            onChange={(e) => setFormData((p) => ({ ...p, notes: e.target.value }))}
+            placeholder="Additional notes..."
+            rows={3}
+          />
+        </div>
       </div>
 
       <div className="flex gap-2">
