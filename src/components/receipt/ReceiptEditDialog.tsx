@@ -110,7 +110,7 @@ const ReceiptEditDialog = ({ receipt, open, onOpenChange, onSuccess }: ReceiptEd
     }
 
     setVendor(receipt.vendor ?? "");
-    setDate(receipt.receipt_date ? new Date(receipt.receipt_date) : undefined);
+    setDate(receipt.receipt_date ? new Date(`${receipt.receipt_date}T12:00:00`) : undefined);
     setTotal(receipt.total !== null && receipt.total !== undefined ? String(receipt.total) : "");
     setTax(receipt.tax !== null && receipt.tax !== undefined ? String(receipt.tax) : "");
     setCategory(normalizeCategory(receipt.category || "Uncategorized"));
