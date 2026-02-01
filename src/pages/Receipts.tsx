@@ -295,7 +295,7 @@ const Receipts = () => {
                       return (
                         <TableRow key={receipt.id}>
                           <TableCell className="whitespace-nowrap">
-                            {new Date(receipt.receipt_date).toLocaleDateString()}
+                            {new Date(`${receipt.receipt_date}T12:00:00`).toLocaleDateString()}
                           </TableCell>
                           <TableCell>{receipt.vendor}</TableCell>
                           <TableCell className="text-right">${receipt.total.toFixed(2)}</TableCell>
