@@ -227,6 +227,10 @@ const Transactions = () => {
       .insert({
         org_id: currentOrg.id,
         name,
+        // ✅ FIX: accounts.type is NOT NULL in your DB. New orgs were inserting NULL and failing.
+        type: "bank",
+        // Safe default (optional). Remove if you want, but it won't break anything.
+        currency: "CAD",
       })
       .select("id,name")
       .single();
