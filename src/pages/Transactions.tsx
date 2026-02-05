@@ -126,6 +126,11 @@ const Transactions = () => {
   const [accountsLoading, setAccountsLoading] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string>("all");
 
+  // ✅ NEW: Create Account modal
+  const [showCreateAccount, setShowCreateAccount] = useState(false);
+  const [newAccountName, setNewAccountName] = useState("");
+  const [accountSaving, setAccountSaving] = useState(false);
+
   // Pagination state
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
@@ -194,6 +199,56 @@ const Transactions = () => {
     }
 
     setAccounts((data as any) || []);
+  };
+
+  // ✅ NEW: Create account
+  const createAccount = async () => {
+    if (!currentOrg) return;
+
+    if (!canManage) {
+      toast({
+        title: "Not allowed",
+        description: "Staff cannot create accounts. Contact an admin/owner.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const name = newAccountName.trim();
+    if (!name) {
+      toast({ title: "Account name is required", variant: "destructive" });
+      return;
+    }
+
+    setAccountSaving(true);
+
+    const { data, error } = await supabase
+      .from("accounts")
+      .insert({
+        org_id: currentOrg.id,
+        name,
+      })
+      .select("id,name")
+      .single();
+
+    setAccountSaving(false);
+
+    if (error) {
+      toast({
+        title: "Failed to create account",
+        description: error.message,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setShowCreateAccount(false);
+    setNewAccountName("");
+
+    await loadAccounts();
+    if (data?.id) setSelectedAccountId(data.id);
+
+    toast({ title: "Account created" });
   };
 
   const loadOrgCategories = async () => {
@@ -386,12 +441,6 @@ const Transactions = () => {
 
   const isTxnMatched = (txnId: string) => matches.some((m) => m.transaction_id === txnId);
 
-  const getLinkedReceiptForTxn = (txnId: string) => {
-    const m = matches.find((x) => x.transaction_id === txnId);
-    if (!m) return null;
-    return linkedReceipts[m.receipt_id] || null;
-  };
-
   const handleUploadReceipt = (txnId?: string) => {
     if (txnId) sessionStorage.setItem("linkTransaction", txnId);
     navigate("/receipts");
@@ -493,33 +542,35 @@ const Transactions = () => {
 
   const categoryNames = useMemo(() => orgCategories.map((c) => c.name), [orgCategories]);
 
-  const filteredTransactions = transactions.filter((t) => {
-    const hay = `${t.description} ${t.vendor_clean ?? ""}`.toLowerCase();
-    const matchesSearch = hay.includes(searchQuery.toLowerCase());
-    if (!matchesSearch) return false;
+  const filteredTransactions = transactions
+    .filter((t) => {
+      const hay = `${t.description} ${t.vendor_clean ?? ""}`.toLowerCase();
+      const matchesSearch = hay.includes(searchQuery.toLowerCase());
+      if (!matchesSearch) return false;
 
-    const matched = isTxnMatched(t.id);
-    if (filterStatus === "matched") return matched;
-    if (filterStatus === "unmatched") return !matched;
+      const matched = isTxnMatched(t.id);
+      if (filterStatus === "matched") return matched;
+      if (filterStatus === "unmatched") return !matched;
 
-    if (filterStatus === "recent") {
-      const d = new Date(t.txn_date);
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - 30);
-      return d >= cutoff;
-    }
+      if (filterStatus === "recent") {
+        const d = new Date(t.txn_date);
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - 30);
+        return d >= cutoff;
+      }
 
-    return true;
-  }).filter((t) => {
-    // ✅ NEW: category filter
-    if (categoryFilter === "all") return true;
+      return true;
+    })
+    .filter((t) => {
+      // ✅ NEW: category filter
+      if (categoryFilter === "all") return true;
 
-    // "Uncategorized" bucket
-    if (categoryFilter === "__uncat__") return isEmptyCategory(t.category);
+      // "Uncategorized" bucket
+      if (categoryFilter === "__uncat__") return isEmptyCategory(t.category);
 
-    // Exact match on category string
-    return (t.category ?? "") === categoryFilter;
-  });
+      // Exact match on category string
+      return (t.category ?? "") === categoryFilter;
+    });
 
   // Apply rules (works again)
   const applyRules = async () => {
@@ -740,6 +791,7 @@ const Transactions = () => {
           {/* Account filter */}
           <div className="flex items-center gap-2 flex-wrap">
             <div className="text-sm text-muted-foreground">Account:</div>
+
             <select
               className="h-9 rounded-md border bg-background px-3 text-sm"
               value={selectedAccountId}
@@ -753,7 +805,77 @@ const Transactions = () => {
                 </option>
               ))}
             </select>
+
+            {/* ✅ NEW: Create account button */}
+            {canManage && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShowCreateAccount(true)}
+              >
+                + New Account
+              </Button>
+            )}
+
+            {/* Optional helper text if empty */}
+            {!accountsLoading && accounts.length === 0 && canManage && (
+              <span className="text-xs text-muted-foreground">
+                No accounts yet — create one to import transactions.
+              </span>
+            )}
           </div>
+
+          {/* ✅ NEW: Create Account Modal */}
+          {showCreateAccount && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+              <div className="w-full max-w-md rounded-lg border bg-background p-4 shadow-lg">
+                <div className="flex items-center justify-between">
+                  <div className="text-lg font-semibold">Create Account</div>
+                  <button
+                    className="text-muted-foreground hover:text-foreground"
+                    onClick={() => setShowCreateAccount(false)}
+                    aria-label="Close"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="mt-3 space-y-2">
+                  <div className="text-sm text-muted-foreground">
+                    Example: CIBC Chequing, PC MasterCard, Cash, etc.
+                  </div>
+
+                  <input
+                    className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                    placeholder="Account name"
+                    value={newAccountName}
+                    onChange={(e) => setNewAccountName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") createAccount();
+                    }}
+                  />
+                </div>
+
+                <div className="mt-4 flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setShowCreateAccount(false)}
+                    disabled={accountSaving}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={createAccount}
+                    disabled={accountSaving}
+                  >
+                    {accountSaving ? "Creating..." : "Create"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* ✅ NEW: Category filter */}
           <div className="flex items-center gap-2 flex-wrap">
