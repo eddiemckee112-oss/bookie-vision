@@ -10,6 +10,8 @@ import SpendingByCategoryChart from "@/components/dashboard/SpendingByCategoryCh
 import DashboardTabs from "@/components/dashboard/DashboardTabs";
 import { format } from "date-fns";
 
+const PAGE_SIZE = 1000;
+
 const Dashboard = () => {
   const { currentOrg, user, loading: orgLoading } = useOrg();
   const navigate = useNavigate();
@@ -25,20 +27,21 @@ const Dashboard = () => {
 
   useEffect(() => {
     if (orgLoading) return;
-    
+
     // Check authentication first
     if (!user) {
       navigate("/auth");
       return;
     }
-    
+
     // Then check for organization
     if (!currentOrg) {
       navigate("/onboard");
       return;
     }
-    
+
     fetchDashboardData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentOrg, user, orgLoading, navigate, fromDate, toDate]);
 
   const fetchDashboardData = async () => {
@@ -59,57 +62,115 @@ const Dashboard = () => {
     }
   };
 
+  const applyDateFilters = (query: any, dateField: string) => {
+    if (fromDate) query = query.gte(dateField, format(fromDate, "yyyy-MM-dd"));
+    if (toDate) query = query.lte(dateField, format(toDate, "yyyy-MM-dd"));
+    return query;
+  };
+
+  // Fetch ALL rows (no 1000 cap) by paging with range()
+  const fetchAllRows = async <T,>({
+    table,
+    select,
+    dateField,
+    orderBy,
+    ascending = true,
+    extraFilters,
+  }: {
+    table: string;
+    select: string;
+    dateField?: string;
+    orderBy?: string;
+    ascending?: boolean;
+    extraFilters?: (q: any) => any;
+  }): Promise<T[]> => {
+    if (!currentOrg) return [];
+
+    const all: T[] = [];
+    let offset = 0;
+
+    while (true) {
+      let q = supabase.from(table).select(select).eq("org_id", currentOrg.id);
+
+      if (dateField) q = applyDateFilters(q, dateField);
+      if (extraFilters) q = extraFilters(q);
+      if (orderBy) q = q.order(orderBy, { ascending });
+
+      q = q.range(offset, offset + PAGE_SIZE - 1);
+
+      const { data, error } = await q;
+      if (error) throw error;
+
+      const chunk = (data as T[]) || [];
+      all.push(...chunk);
+
+      if (chunk.length < PAGE_SIZE) break;
+      offset += PAGE_SIZE;
+    }
+
+    return all;
+  };
+
   const fetchKPIData = async () => {
     if (!currentOrg) return;
 
-    // Fetch receipts
-    let receiptsQuery = supabase
-      .from("receipts")
-      .select("id, total, tax, subtotal")
-      .eq("org_id", currentOrg.id);
-
-    if (fromDate) receiptsQuery = receiptsQuery.gte("receipt_date", format(fromDate, "yyyy-MM-dd"));
-    if (toDate) receiptsQuery = receiptsQuery.lte("receipt_date", format(toDate, "yyyy-MM-dd"));
-
-    const { data: receiptsData } = await receiptsQuery;
+    // Fetch ALL receipts in range (avoid 1000 cap)
+    const receiptsData = await fetchAllRows<any>({
+      table: "receipts",
+      select: "id, total, tax, subtotal, receipt_date",
+      dateField: "receipt_date",
+      orderBy: "receipt_date",
+      ascending: true,
+    });
 
     const receiptsCount = receiptsData?.length || 0;
-    const receiptsTotal = receiptsData?.reduce((sum, r) => sum + (r.total || 0), 0) || 0;
-    const receiptsTax = receiptsData?.reduce((sum, r) => sum + (r.tax || 0), 0) || 0;
-    const receiptsSubtotal = receiptsData?.reduce((sum, r) => sum + (r.subtotal || 0), 0) || 0;
+    const receiptsTotal =
+      receiptsData?.reduce((sum: number, r: any) => sum + (r.total || 0), 0) || 0;
+    const receiptsTax =
+      receiptsData?.reduce((sum: number, r: any) => sum + (r.tax || 0), 0) || 0;
+    const receiptsSubtotal =
+      receiptsData?.reduce((sum: number, r: any) => sum + (r.subtotal || 0), 0) || 0;
 
-    // Fetch transactions
-    let transactionsQuery = supabase
-      .from("transactions")
-      .select("id, amount, direction")
-      .eq("org_id", currentOrg.id);
-
-    if (fromDate) transactionsQuery = transactionsQuery.gte("txn_date", format(fromDate, "yyyy-MM-dd"));
-    if (toDate) transactionsQuery = transactionsQuery.lte("txn_date", format(toDate, "yyyy-MM-dd"));
-
-    const { data: transactionsData } = await transactionsQuery;
+    // Fetch ALL transactions in range (avoid 1000 cap)
+    const transactionsData = await fetchAllRows<any>({
+      table: "transactions",
+      select: "id, amount, direction, txn_date",
+      dateField: "txn_date",
+      orderBy: "txn_date",
+      ascending: true,
+    });
 
     const transactionsCount = transactionsData?.length || 0;
-    const transactionsDebits = transactionsData?.filter(t => t.direction === "debit").reduce((sum, t) => sum + t.amount, 0) || 0;
-    const transactionsCredits = transactionsData?.filter(t => t.direction === "credit").reduce((sum, t) => sum + t.amount, 0) || 0;
 
-    // Fetch matches
-    const { data: matchesData } = await supabase
-      .from("matches")
-      .select("receipt_id, transaction_id")
-      .eq("org_id", currentOrg.id);
+    const transactionsDebits =
+      transactionsData
+        ?.filter((t: any) => t.direction === "debit")
+        .reduce((sum: number, t: any) => sum + (t.amount || 0), 0) || 0;
 
-    const matchedReceiptIds = new Set(matchesData?.map(m => m.receipt_id) || []);
-    const matchedTransactionIds = new Set(matchesData?.map(m => m.transaction_id) || []);
+    const transactionsCredits =
+      transactionsData
+        ?.filter((t: any) => t.direction === "credit")
+        .reduce((sum: number, t: any) => sum + (t.amount || 0), 0) || 0;
 
-    // Count matched receipts and transactions in this period
-    const receiptsMatched = receiptsData?.filter((r: any) => 
-      matchedReceiptIds.has(r.id)
-    ).length || 0;
+    // NEW: net (profit/loss style) for selected range
+    const transactionsNet = transactionsCredits - transactionsDebits;
 
-    const transactionsMatched = transactionsData?.filter((t: any) =>
-      matchedTransactionIds.has(t.id)
-    ).length || 0;
+    // Fetch ALL matches for org (no date filter here because matches link ids)
+    const matchesData = await fetchAllRows<any>({
+      table: "matches",
+      select: "receipt_id, transaction_id",
+      // no dateField on matches (keep it simple + correct)
+    });
+
+    const matchedReceiptIds = new Set(matchesData?.map((m: any) => m.receipt_id) || []);
+    const matchedTransactionIds = new Set(matchesData?.map((m: any) => m.transaction_id) || []);
+
+    // Count matched receipts/transactions in THIS period
+    const receiptsMatched =
+      receiptsData?.filter((r: any) => matchedReceiptIds.has(r.id)).length || 0;
+
+    const transactionsMatched =
+      transactionsData?.filter((t: any) => matchedTransactionIds.has(t.id)).length || 0;
 
     setKpiData({
       receiptsCount,
@@ -118,9 +179,14 @@ const Dashboard = () => {
       receiptsTotal,
       receiptsMatched,
       receiptsUnmatched: receiptsCount - receiptsMatched,
+
       transactionsCount,
       transactionsDebits,
       transactionsCredits,
+
+      // NEW totals you asked for:
+      transactionsNet, // credits - debits for the selected range
+
       transactionsMatched,
       transactionsUnmatched: transactionsCount - transactionsMatched,
     });
@@ -129,16 +195,14 @@ const Dashboard = () => {
   const fetchCashFlowData = async () => {
     if (!currentOrg) return;
 
-    let query = supabase
-      .from("transactions")
-      .select("txn_date, amount, direction")
-      .eq("org_id", currentOrg.id)
-      .order("txn_date");
-
-    if (fromDate) query = query.gte("txn_date", format(fromDate, "yyyy-MM-dd"));
-    if (toDate) query = query.lte("txn_date", format(toDate, "yyyy-MM-dd"));
-
-    const { data } = await query;
+    // Fetch ALL transactions for cashflow (avoid 1000 cap)
+    const data = await fetchAllRows<any>({
+      table: "transactions",
+      select: "txn_date, amount, direction",
+      dateField: "txn_date",
+      orderBy: "txn_date",
+      ascending: true,
+    });
 
     // Group by date
     const dailyData = new Map<string, { debits: number; credits: number }>();
@@ -150,9 +214,9 @@ const Dashboard = () => {
       }
       const day = dailyData.get(date)!;
       if (txn.direction === "debit") {
-        day.debits += txn.amount;
+        day.debits += txn.amount || 0;
       } else {
-        day.credits += txn.amount;
+        day.credits += txn.amount || 0;
       }
     });
 
@@ -171,20 +235,19 @@ const Dashboard = () => {
   const fetchCategoryData = async () => {
     if (!currentOrg) return;
 
-    let query = supabase
-      .from("receipts")
-      .select("category, total")
-      .eq("org_id", currentOrg.id);
-
-    if (fromDate) query = query.gte("receipt_date", format(fromDate, "yyyy-MM-dd"));
-    if (toDate) query = query.lte("receipt_date", format(toDate, "yyyy-MM-dd"));
-
-    const { data } = await query;
+    // Fetch ALL receipts for category spending (avoid 1000 cap)
+    const data = await fetchAllRows<any>({
+      table: "receipts",
+      select: "category, total, receipt_date",
+      dateField: "receipt_date",
+      orderBy: "receipt_date",
+      ascending: true,
+    });
 
     const categoryMap = new Map<string, number>();
     data?.forEach((r: any) => {
       const cat = r.category || "Uncategorized";
-      categoryMap.set(cat, (categoryMap.get(cat) || 0) + r.total);
+      categoryMap.set(cat, (categoryMap.get(cat) || 0) + (r.total || 0));
     });
 
     const chartData = Array.from(categoryMap.entries())
@@ -198,30 +261,28 @@ const Dashboard = () => {
   const fetchTransactions = async () => {
     if (!currentOrg) return;
 
-    let query = supabase
-      .from("transactions")
-      .select("id, txn_date, description, amount, category, source_account_name, direction")
-      .eq("org_id", currentOrg.id)
-      .order("txn_date", { ascending: false })
-      .limit(50);
+    // Fetch ALL transactions for the table (avoid 1000 cap + remove small limit)
+    const txnData = await fetchAllRows<any>({
+      table: "transactions",
+      select: "id, txn_date, description, amount, category, source_account_name, direction",
+      dateField: "txn_date",
+      orderBy: "txn_date",
+      ascending: false,
+    });
 
-    if (fromDate) query = query.gte("txn_date", format(fromDate, "yyyy-MM-dd"));
-    if (toDate) query = query.lte("txn_date", format(toDate, "yyyy-MM-dd"));
+    // Fetch ALL matches (avoid 1000 cap)
+    const matchesData = await fetchAllRows<any>({
+      table: "matches",
+      select: "transaction_id",
+    });
 
-    const { data: txnData } = await query;
+    const matchedTxnIds = new Set(matchesData?.map((m: any) => m.transaction_id) || []);
 
-    // Get matches for these transactions
-    const { data: matchesData } = await supabase
-      .from("matches")
-      .select("transaction_id")
-      .eq("org_id", currentOrg.id);
-
-    const matchedTxnIds = new Set(matchesData?.map(m => m.transaction_id) || []);
-
-    const enrichedData = txnData?.map((txn: any) => ({
-      ...txn,
-      isMatched: matchedTxnIds.has(txn.id),
-    })) || [];
+    const enrichedData =
+      txnData?.map((txn: any) => ({
+        ...txn,
+        isMatched: matchedTxnIds.has(txn.id),
+      })) || [];
 
     setTransactions(enrichedData);
   };
@@ -229,50 +290,45 @@ const Dashboard = () => {
   const fetchMatchedPairs = async () => {
     if (!currentOrg) return;
 
-    const { data: matchesData } = await supabase
-      .from("matches")
-      .select(`
-        id,
-        created_at,
-        confidence,
-        method,
-        receipt_id,
-        transaction_id
-      `)
-      .eq("org_id", currentOrg.id)
-      .order("created_at", { ascending: false })
-      .limit(50);
+    // Fetch ALL matches (avoid 1000 cap). Keep newest first.
+    const matchesData = await fetchAllRows<any>({
+      table: "matches",
+      select: "id, created_at, confidence, method, receipt_id, transaction_id",
+      orderBy: "created_at",
+      ascending: false,
+    });
 
     if (!matchesData || matchesData.length === 0) {
       setMatchedPairs([]);
       return;
     }
 
-    // Fetch receipts
-    const receiptIds = matchesData.map(m => m.receipt_id);
-    const { data: receiptsData } = await supabase
-      .from("receipts")
-      .select("id, receipt_date, vendor, total")
-      .in("id", receiptIds);
+    // Fetch receipts for those match ids (no date filter here; we’ll filter by txn date like you had)
+    const receiptIds = Array.from(new Set(matchesData.map((m: any) => m.receipt_id)));
+    const receiptsData = await fetchAllRows<any>({
+      table: "receipts",
+      select: "id, receipt_date, vendor, total",
+      // IMPORTANT: do NOT date-filter receipts here; matches might link across dates
+      extraFilters: (q) => q.in("id", receiptIds),
+    });
 
-    // Fetch transactions
-    const txnIds = matchesData.map(m => m.transaction_id);
-    let txnQuery = supabase
-      .from("transactions")
-      .select("id, txn_date, description, amount")
-      .in("id", txnIds);
+    // Fetch transactions for those match ids WITH date filter (same behavior you had)
+    const txnIds = Array.from(new Set(matchesData.map((m: any) => m.transaction_id)));
+    const txnData = await fetchAllRows<any>({
+      table: "transactions",
+      select: "id, txn_date, description, amount",
+      dateField: "txn_date",
+      orderBy: "txn_date",
+      ascending: false,
+      extraFilters: (q) => q.in("id", txnIds),
+    });
 
-    if (fromDate) txnQuery = txnQuery.gte("txn_date", format(fromDate, "yyyy-MM-dd"));
-    if (toDate) txnQuery = txnQuery.lte("txn_date", format(toDate, "yyyy-MM-dd"));
-
-    const { data: txnData } = await txnQuery;
-
-    const receiptsMap = new Map(receiptsData?.map(r => [r.id, r]) || []);
-    const txnMap = new Map(txnData?.map(t => [t.id, t]) || []);
+    const receiptsMap = new Map(receiptsData?.map((r: any) => [r.id, r]) || []);
+    const txnMap = new Map(txnData?.map((t: any) => [t.id, t]) || []);
 
     const pairs = matchesData
-      .filter(m => txnMap.has(m.transaction_id)) // Only include if transaction is in date range
-      .map(m => {
+      .filter((m: any) => txnMap.has(m.transaction_id)) // Only include if transaction is in date range
+      .map((m: any) => {
         const receipt = receiptsMap.get(m.receipt_id);
         const txn = txnMap.get(m.transaction_id);
         return {
@@ -295,30 +351,28 @@ const Dashboard = () => {
   const fetchReceipts = async () => {
     if (!currentOrg) return;
 
-    let query = supabase
-      .from("receipts")
-      .select("id, receipt_date, vendor, total, category, source")
-      .eq("org_id", currentOrg.id)
-      .order("receipt_date", { ascending: false })
-      .limit(50);
+    // Fetch ALL receipts for the table (avoid 1000 cap + remove small limit)
+    const receiptsData = await fetchAllRows<any>({
+      table: "receipts",
+      select: "id, receipt_date, vendor, total, category, source",
+      dateField: "receipt_date",
+      orderBy: "receipt_date",
+      ascending: false,
+    });
 
-    if (fromDate) query = query.gte("receipt_date", format(fromDate, "yyyy-MM-dd"));
-    if (toDate) query = query.lte("receipt_date", format(toDate, "yyyy-MM-dd"));
+    // Fetch ALL matches (avoid 1000 cap)
+    const matchesData = await fetchAllRows<any>({
+      table: "matches",
+      select: "receipt_id",
+    });
 
-    const { data: receiptsData } = await query;
+    const matchedReceiptIds = new Set(matchesData?.map((m: any) => m.receipt_id) || []);
 
-    // Get matches
-    const { data: matchesData } = await supabase
-      .from("matches")
-      .select("receipt_id")
-      .eq("org_id", currentOrg.id);
-
-    const matchedReceiptIds = new Set(matchesData?.map(m => m.receipt_id) || []);
-
-    const enrichedData = receiptsData?.map((r: any) => ({
-      ...r,
-      isMatched: matchedReceiptIds.has(r.id),
-    })) || [];
+    const enrichedData =
+      receiptsData?.map((r: any) => ({
+        ...r,
+        isMatched: matchedReceiptIds.has(r.id),
+      })) || [];
 
     setReceipts(enrichedData);
   };
@@ -336,9 +390,7 @@ const Dashboard = () => {
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold">Dashboard</h1>
-          <p className="text-muted-foreground">
-            Accounting control center • Real-time financial overview
-          </p>
+          <p className="text-muted-foreground">Accounting control center • Real-time financial overview</p>
         </div>
 
         <div className="bg-card border rounded-lg p-4">
@@ -361,11 +413,7 @@ const Dashboard = () => {
               <SpendingByCategoryChart data={categoryData} />
             </div>
 
-            <DashboardTabs
-              transactions={transactions}
-              matchedPairs={matchedPairs}
-              receipts={receipts}
-            />
+            <DashboardTabs transactions={transactions} matchedPairs={matchedPairs} receipts={receipts} />
           </>
         )}
       </div>
