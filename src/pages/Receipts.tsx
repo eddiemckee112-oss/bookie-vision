@@ -10,7 +10,7 @@ import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ExternalLink, Link as LinkIcon, Pencil, Trash2 } from "lucide-react";
+import { Download, ExternalLink, Link as LinkIcon, Pencil, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 
@@ -36,6 +36,7 @@ const Receipts = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [editingReceipt, setEditingReceipt] = useState<Receipt | null>(null);
+  const [isDownloadingImages, setIsDownloadingImages] = useState(false);
   const { toast } = useToast();
 
   const canManage = useMemo(() => orgRole === "owner" || orgRole === "admin", [orgRole]);
@@ -114,6 +115,78 @@ const Receipts = () => {
 
     const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
     return data.publicUrl;
+  };
+
+  const sanitizeFileName = (value: string) =>
+    value
+      .replace(/[^a-z0-9._-]+/gi, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 120) || "receipt";
+
+  const getFileExtension = (url: string, imageUrl: string | null) => {
+    const source = (imageUrl || url).split("?")[0];
+    const match = source.match(/\.([a-zA-Z0-9]{3,5})$/);
+    return match ? `.${match[1].toLowerCase()}` : ".jpg";
+  };
+
+  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const handleDownloadVisibleImages = async () => {
+    if (isStaff) return;
+
+    const receiptsWithImages = filteredReceipts.filter((receipt) => receipt.image_url);
+    if (receiptsWithImages.length === 0) {
+      toast({ title: "No receipt images to download", variant: "destructive" });
+      return;
+    }
+
+    const confirmed = confirm(
+      `Download ${receiptsWithImages.length} visible receipt image(s)? Your browser may ask you to allow multiple downloads.`
+    );
+    if (!confirmed) return;
+
+    setIsDownloadingImages(true);
+    let downloaded = 0;
+    let failed = 0;
+
+    for (const receipt of receiptsWithImages) {
+      if (!receipt.image_url) continue;
+
+      try {
+        const url = resolveReceiptImageUrl(receipt.image_url);
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const extension = getFileExtension(url, receipt.image_url);
+        const fileName = sanitizeFileName(
+          `${receipt.receipt_date}_${receipt.vendor}_${receipt.total.toFixed(2)}_${receipt.id}${extension}`
+        );
+
+        const link = document.createElement("a");
+        link.href = objectUrl;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(objectUrl);
+
+        downloaded += 1;
+        await wait(300);
+      } catch (error) {
+        console.error("Receipt image download failed:", receipt.id, error);
+        failed += 1;
+      }
+    }
+
+    setIsDownloadingImages(false);
+    toast({
+      title: "Receipt image download finished",
+      description: `${downloaded} downloaded${failed ? `, ${failed} failed` : ""}.`,
+      variant: failed ? "destructive" : "default",
+    });
   };
 
   const handleOpenImage = (imageUrl: string | null) => {
@@ -233,11 +306,19 @@ const Receipts = () => {
   return (
     <Layout>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold">Receipts</h1>
-          <p className="text-muted-foreground">
-            Manage your receipts • {receipts.length} total • {matchedCount} matched • {unmatchedCount} unmatched
-          </p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold">Receipts</h1>
+            <p className="text-muted-foreground">
+              Manage your receipts • {receipts.length} total • {matchedCount} matched • {unmatchedCount} unmatched
+            </p>
+          </div>
+          {!isStaff && (
+            <Button onClick={handleDownloadVisibleImages} disabled={isDownloadingImages || filteredReceipts.length === 0}>
+              <Download className="mr-2 h-4 w-4" />
+              {isDownloadingImages ? "Downloading..." : "Download visible images"}
+            </Button>
+          )}
         </div>
 
         <Card className="p-6">
