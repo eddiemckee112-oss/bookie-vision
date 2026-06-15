@@ -157,6 +157,13 @@ export const OrgProvider = ({ children }: { children: ReactNode }) => {
         return;
       }
 
+      // Important: when signing in, keep the app in loading mode until orgs finish loading.
+      // Otherwise pages can think there is no company and send the user to /onboard too early.
+      setLoading(true);
+      setCurrentOrg(null);
+      setOrgRole(null);
+      setOrgs([]);
+
       setTimeout(async () => {
         const orgData = await fetchOrgs(u.id);
         const orgsArray: Org[] = orgData.map((ou: any) => ou.orgs).filter(Boolean);
