@@ -177,6 +177,45 @@ const Transactions = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentOrg, orgLoading, navigate, dateMode, monthValue, startDate, endDate, selectedAccountId]);
 
+  useEffect(() => {
+    if (orgLoading || !currentOrg) return;
+
+    const targetTxnId = sessionStorage.getItem("viewTransaction");
+    if (!targetTxnId) return;
+
+    sessionStorage.removeItem("viewTransaction");
+
+    const loadTargetTransaction = async () => {
+      const { data, error } = await supabase
+        .from("transactions")
+        .select("id, txn_date, account_id")
+        .eq("org_id", currentOrg.id)
+        .eq("id", targetTxnId)
+        .maybeSingle();
+
+      if (error || !data) {
+        toast({
+          title: "Transaction not found",
+          description: error?.message || "Could not find the matched transaction.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setDateMode("range");
+      setStartDate(data.txn_date);
+      setEndDate(data.txn_date);
+      if (data.account_id) setSelectedAccountId(data.account_id);
+      setFilterStatus("all");
+      setSearchQuery(targetTxnId);
+
+      toast({ title: "Showing matched transaction" });
+    };
+
+    loadTargetTransaction();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentOrg?.id, orgLoading]);
+
   const loadAccounts = async () => {
     if (!currentOrg) return;
     setAccountsLoading(true);
@@ -548,7 +587,7 @@ const Transactions = () => {
 
   const filteredTransactions = transactions
     .filter((t) => {
-      const hay = `${t.description} ${t.vendor_clean ?? ""}`.toLowerCase();
+      const hay = `${t.id} ${t.description} ${t.vendor_clean ?? ""}`.toLowerCase();
       const matchesSearch = hay.includes(searchQuery.toLowerCase());
       if (!matchesSearch) return false;
 

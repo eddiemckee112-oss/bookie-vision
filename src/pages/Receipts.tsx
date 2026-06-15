@@ -32,7 +32,7 @@ const Receipts = () => {
   const { currentOrg, loading: orgLoading, orgRole } = useOrg();
   const navigate = useNavigate();
   const [receipts, setReceipts] = useState<Receipt[]>([]);
-  const [matches, setMatches] = useState<Record<string, boolean>>({});
+  const [matches, setMatches] = useState<Record<string, string>>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [editingReceipt, setEditingReceipt] = useState<Receipt | null>(null);
@@ -75,7 +75,7 @@ const Receipts = () => {
     // Keep this exactly the same (status badges)
     const { data: matchesData, error: matchesErr } = await supabase
       .from("matches")
-      .select("receipt_id")
+      .select("receipt_id, transaction_id")
       .eq("org_id", currentOrg.id);
 
     if (matchesErr) {
@@ -84,11 +84,16 @@ const Receipts = () => {
       return;
     }
 
-    const matchMap: Record<string, boolean> = {};
+    const matchMap: Record<string, string> = {};
     matchesData?.forEach((m: any) => {
-      matchMap[m.receipt_id] = true;
+      matchMap[m.receipt_id] = m.transaction_id;
     });
     setMatches(matchMap);
+  };
+
+  const handleViewTransaction = (transactionId: string) => {
+    sessionStorage.setItem("viewTransaction", transactionId);
+    navigate("/transactions");
   };
 
   const handleMatchNow = (receiptId: string) => {
@@ -400,14 +405,25 @@ const Receipts = () => {
                                   >
                                     <ExternalLink className="h-4 w-4" />
                                   </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => handleMatchNow(receipt.id)}
-                                    title="Match now"
-                                  >
-                                    <LinkIcon className="h-4 w-4" />
-                                  </Button>
+                                  {matches[receipt.id] ? (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handleViewTransaction(matches[receipt.id])}
+                                      title="View matched transaction"
+                                    >
+                                      View Txn
+                                    </Button>
+                                  ) : (
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => handleMatchNow(receipt.id)}
+                                      title="Match now"
+                                    >
+                                      <LinkIcon className="h-4 w-4" />
+                                    </Button>
+                                  )}
                                 </>
                               )}
 
