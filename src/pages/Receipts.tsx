@@ -49,6 +49,15 @@ const Receipts = () => {
       return;
     }
     fetchReceipts();
+
+    const targetReceiptId = sessionStorage.getItem("viewReceipt");
+    if (targetReceiptId) {
+      sessionStorage.removeItem("viewReceipt");
+      setFilterStatus("all");
+      setSearchQuery(targetReceiptId);
+      toast({ title: "Showing matched receipt" });
+    }
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentOrg?.id, orgLoading]);
 
@@ -276,6 +285,7 @@ const Receipts = () => {
 
   const filteredReceipts = receipts.filter((receipt) => {
     const matchesSearch =
+      receipt.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
       receipt.vendor.toLowerCase().includes(searchQuery.toLowerCase()) ||
       receipt.notes?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       receipt.source?.toLowerCase().includes(searchQuery.toLowerCase());

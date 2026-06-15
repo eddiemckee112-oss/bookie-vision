@@ -484,6 +484,11 @@ const Transactions = () => {
 
   const isTxnMatched = (txnId: string) => matches.some((m) => m.transaction_id === txnId);
 
+  const handleViewReceipt = (receiptId: string) => {
+    sessionStorage.setItem("viewReceipt", receiptId);
+    navigate("/receipts");
+  };
+
   const handleUploadReceipt = (txnId?: string) => {
     if (txnId) sessionStorage.setItem("linkTransaction", txnId);
     navigate("/receipts");
@@ -1209,9 +1214,15 @@ const Transactions = () => {
 
                         <TableCell className="text-right whitespace-nowrap">
                           <div className="flex justify-end gap-2">
-                            <Button variant="outline" size="sm" onClick={() => handleUploadReceipt(txn.id)}>
-                              Upload Receipt
-                            </Button>
+                            {receipt ? (
+                              <Button variant="outline" size="sm" onClick={() => handleViewReceipt(receipt.id)}>
+                                View Receipt
+                              </Button>
+                            ) : (
+                              <Button variant="outline" size="sm" onClick={() => handleUploadReceipt(txn.id)}>
+                                Upload Receipt
+                              </Button>
+                            )}
 
                             {/* Owners/Admin only */}
                             {canManage && (
