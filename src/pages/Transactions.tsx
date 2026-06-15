@@ -768,7 +768,7 @@ const Transactions = () => {
       );
 
       const usedReceiptIds = new Set<string>();
-      const newMatches: { org_id: string; transaction_id: string; receipt_id: string }[] = [];
+      const newMatches: { org_id: string; transaction_id: string; receipt_id: string; matched_amount: number }[] = [];
 
       for (const txn of (transactionsData || []) as any[]) {
         if (matchedTxnIds.has(txn.id)) continue;
@@ -805,6 +805,7 @@ const Transactions = () => {
           org_id: currentOrg.id,
           transaction_id: txn.id,
           receipt_id: best.id,
+          matched_amount: Number(best.total),
         });
 
         usedReceiptIds.add(best.id);
