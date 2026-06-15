@@ -136,6 +136,12 @@ const Transactions = () => {
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
+  // Warning-only duplicate tracking. Clearing a warning does NOT delete anything.
+  const [clearedDuplicateTxnIds, setClearedDuplicateTxnIds] = useState<string[]>([]);
+  const duplicateWarningStorageKey = currentOrg
+    ? `clearedDuplicateTransactionWarnings:${currentOrg.id}`
+    : "";
+
   const dateWindow = useMemo(() => {
     const now = new Date();
 
@@ -158,6 +164,20 @@ const Transactions = () => {
 
     return { from: startDate || null, to: endDate || null };
   }, [dateMode, monthValue, startDate, endDate]);
+
+  useEffect(() => {
+    if (!currentOrg) {
+      setClearedDuplicateTxnIds([]);
+      return;
+    }
+
+    try {
+      const stored = localStorage.getItem(`clearedDuplicateTransactionWarnings:${currentOrg.id}`);
+      setClearedDuplicateTxnIds(stored ? JSON.parse(stored) : []);
+    } catch {
+      setClearedDuplicateTxnIds([]);
+    }
+  }, [currentOrg?.id]);
 
   useEffect(() => {
     if (orgLoading) return;
@@ -619,6 +639,48 @@ const Transactions = () => {
       // Exact match on category string
       return (t.category ?? "") === categoryFilter;
     });
+
+  const duplicateTransactionIds = useMemo(() => {
+    const cleared = new Set(clearedDuplicateTxnIds);
+    const groups = new Map<string, string[]>();
+
+    for (const txn of transactions) {
+      const vendorOrDesc = norm(txn.vendor_clean || txn.description).replace(/\s+/g, " ").slice(0, 80);
+      const key = [
+        txn.account_id || "",
+        txn.txn_date,
+        norm(txn.direction),
+        Number(txn.amount || 0).toFixed(2),
+        vendorOrDesc,
+      ].join("|");
+
+      const list = groups.get(key) || [];
+      list.push(txn.id);
+      groups.set(key, list);
+    }
+
+    const duplicates = new Set<string>();
+    groups.forEach((ids) => {
+      if (ids.length > 1) {
+        ids.forEach((id) => {
+          if (!cleared.has(id)) duplicates.add(id);
+        });
+      }
+    });
+
+    return duplicates;
+  }, [transactions, clearedDuplicateTxnIds]);
+
+  const clearDuplicateWarning = (txnId: string) => {
+    const next = Array.from(new Set([...clearedDuplicateTxnIds, txnId]));
+    setClearedDuplicateTxnIds(next);
+
+    if (duplicateWarningStorageKey) {
+      localStorage.setItem(duplicateWarningStorageKey, JSON.stringify(next));
+    }
+
+    toast({ title: "Duplicate warning cleared" });
+  };
 
   // Apply rules (works again)
   const applyRules = async () => {
@@ -1141,9 +1203,13 @@ const Transactions = () => {
                       txn.category && !categoryNames.includes(txn.category) ? txn.category : null;
 
                     const uncategorized = isEmptyCategory(txn.category);
+                    const isPossibleDuplicate = duplicateTransactionIds.has(txn.id);
 
                     return (
-                      <TableRow key={txn.id} className={uncategorized ? "bg-yellow-50" : ""}>
+                      <TableRow
+                        key={txn.id}
+                        className={isPossibleDuplicate ? "bg-orange-50" : uncategorized ? "bg-yellow-50" : ""}
+                      >
                         <TableCell className="whitespace-nowrap">{txn.txn_date}</TableCell>
 
                         <TableCell className="min-w-[360px]">
@@ -1203,17 +1269,31 @@ const Transactions = () => {
                         </TableCell>
 
                         <TableCell className="whitespace-nowrap">
-                          <span
-                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs ${
-                              matched ? "bg-blue-50 text-blue-700" : "bg-gray-100 text-gray-700"
-                            }`}
-                          >
-                            {matched ? "Matched" : "Unmatched"}
-                          </span>
+                          <div className="flex flex-col gap-1">
+                            <span
+                              className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-xs ${
+                                matched ? "bg-blue-50 text-blue-700" : "bg-gray-100 text-gray-700"
+                              }`}
+                            >
+                              {matched ? "Matched" : "Unmatched"}
+                            </span>
+
+                            {isPossibleDuplicate ? (
+                              <span className="inline-flex w-fit items-center rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-800">
+                                Possible duplicate
+                              </span>
+                            ) : null}
+                          </div>
                         </TableCell>
 
                         <TableCell className="text-right whitespace-nowrap">
                           <div className="flex justify-end gap-2">
+                            {isPossibleDuplicate ? (
+                              <Button variant="outline" size="sm" onClick={() => clearDuplicateWarning(txn.id)}>
+                                Clear Warning
+                              </Button>
+                            ) : null}
+
                             {receipt ? (
                               <Button variant="outline" size="sm" onClick={() => handleViewReceipt(receipt.id)}>
                                 View Receipt

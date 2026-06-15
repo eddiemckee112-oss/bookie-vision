@@ -315,6 +315,48 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
       return;
     }
 
+    const receiptVendor = formData.vendor.trim();
+    const receiptDate = format(formData.receipt_date, "yyyy-MM-dd");
+    const receiptTotal = parseFloat(formData.total);
+
+    const normalizeDupeText = (value: string) =>
+      value.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+
+    try {
+      const { data: possibleDupes, error: duplicateError } = await supabase
+        .from("receipts")
+        .select("id, vendor, receipt_date, total")
+        .eq("org_id", currentOrg.id)
+        .eq("receipt_date", receiptDate)
+        .gte("total", receiptTotal - 0.01)
+        .lte("total", receiptTotal + 0.01);
+
+      if (duplicateError) {
+        console.warn("Duplicate receipt check failed:", duplicateError.message);
+      } else {
+        const newVendor = normalizeDupeText(receiptVendor);
+        const duplicateReceipts = ((possibleDupes || []) as any[]).filter((r) => {
+          const existingVendor = normalizeDupeText(r.vendor || "");
+          return (
+            existingVendor === newVendor ||
+            existingVendor.includes(newVendor) ||
+            newVendor.includes(existingVendor)
+          );
+        });
+
+        if (duplicateReceipts.length > 0) {
+          const first = duplicateReceipts[0];
+          const ok = window.confirm(
+            `Possible duplicate receipt found.\n\nExisting: ${first.vendor} on ${first.receipt_date} for $${Number(first.total).toFixed(2)}\n\nContinue uploading anyway?`
+          );
+
+          if (!ok) return;
+        }
+      }
+    } catch (duplicateCheckError) {
+      console.warn("Duplicate receipt check failed:", duplicateCheckError);
+    }
+
     setIsUploading(true);
     try {
       let imageUrl: string | null = null;
@@ -332,9 +374,9 @@ const ReceiptForm = ({ onSuccess }: ReceiptFormProps) => {
 
       const { error } = await supabase.from("receipts").insert({
         org_id: currentOrg.id,
-        vendor: formData.vendor.trim(),
-        receipt_date: format(formData.receipt_date, "yyyy-MM-dd"),
-        total: parseFloat(formData.total),
+        vendor: receiptVendor,
+        receipt_date: receiptDate,
+        total: receiptTotal,
         tax: formData.tax ? parseFloat(formData.tax) : 0,
         category: safeCategory,
         source: formData.source || null,
