@@ -698,12 +698,143 @@ const Transactions = () => {
     }
   };
 
-  // (Auto Match later)
-  const autoMatch = () => {
-    toast({
-      title: "Auto Match (later)",
-      description: "Finish importing months first.",
-    });
+  const autoMatch = async () => {
+    if (!currentOrg) return;
+
+    if (!canManage) {
+      toast({
+        title: "Not allowed",
+        description: "Staff cannot auto-match receipts.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const ok = window.confirm(
+      "Auto-match receipts to bank transactions? This only creates match links. It will not delete or change receipts/transactions."
+    );
+    if (!ok) return;
+
+    try {
+      const clean = (value?: string | null) =>
+        (value || "")
+          .toLowerCase()
+          .replace(/[^a-z0-9 ]/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+
+      const dayDiff = (a: string, b: string) => {
+        const da = new Date(`${a}T12:00:00`).getTime();
+        const db = new Date(`${b}T12:00:00`).getTime();
+        return Math.abs(da - db) / 86400000;
+      };
+
+      const { data: existingMatches, error: matchLoadError } = await supabase
+        .from("matches")
+        .select("transaction_id, receipt_id")
+        .eq("org_id", currentOrg.id);
+
+      if (matchLoadError) throw matchLoadError;
+
+      const matchedTxnIds = new Set((existingMatches || []).map((m: any) => m.transaction_id));
+      const matchedReceiptIds = new Set((existingMatches || []).map((m: any) => m.receipt_id));
+
+      const { data: receiptsData, error: receiptLoadError } = await supabase
+        .from("receipts")
+        .select("id, vendor, receipt_date, total, source")
+        .eq("org_id", currentOrg.id);
+
+      if (receiptLoadError) throw receiptLoadError;
+
+      let txnQuery = supabase
+        .from("transactions")
+        .select("id, txn_date, description, vendor_clean, amount, direction, account_id")
+        .eq("org_id", currentOrg.id)
+        .eq("direction", "debit")
+        .order("txn_date", { ascending: false })
+        .limit(1000);
+
+      if (selectedAccountId !== "all") {
+        txnQuery = txnQuery.eq("account_id", selectedAccountId);
+      }
+      if (dateWindow.from) txnQuery = txnQuery.gte("txn_date", dateWindow.from);
+      if (dateWindow.to) txnQuery = txnQuery.lte("txn_date", dateWindow.to);
+
+      const { data: transactionsData, error: txnLoadError } = await txnQuery;
+      if (txnLoadError) throw txnLoadError;
+
+      const usableReceipts = ((receiptsData || []) as any[]).filter(
+        (r) => !(r.source || "").toLowerCase().includes("cash")
+      );
+
+      const usedReceiptIds = new Set<string>();
+      const newMatches: { org_id: string; transaction_id: string; receipt_id: string }[] = [];
+
+      for (const txn of (transactionsData || []) as any[]) {
+        if (matchedTxnIds.has(txn.id)) continue;
+
+        const candidates = usableReceipts.filter((receipt) => {
+          if (matchedReceiptIds.has(receipt.id)) return false;
+          if (usedReceiptIds.has(receipt.id)) return false;
+
+          const sameAmount = Math.abs(Number(receipt.total) - Number(txn.amount)) <= 0.01;
+          const closeDate = dayDiff(receipt.receipt_date, txn.txn_date) <= 3;
+
+          return sameAmount && closeDate;
+        });
+
+        if (candidates.length === 0) continue;
+
+        const txnText = clean(`${txn.description} ${txn.vendor_clean || ""}`);
+        const vendorMatches = candidates.filter((receipt) => {
+          const words = clean(receipt.vendor).split(" ").filter((w) => w.length >= 4);
+          return words.some((word) => txnText.includes(word));
+        });
+
+        let best = null;
+
+        if (vendorMatches.length === 1) {
+          best = vendorMatches[0];
+        } else if (candidates.length === 1) {
+          best = candidates[0];
+        }
+
+        if (!best) continue;
+
+        newMatches.push({
+          org_id: currentOrg.id,
+          transaction_id: txn.id,
+          receipt_id: best.id,
+        });
+
+        usedReceiptIds.add(best.id);
+      }
+
+      if (newMatches.length === 0) {
+        toast({
+          title: "No matches found",
+          description: "Nothing lined up by amount/date/vendor.",
+        });
+        return;
+      }
+
+      const { error: insertError } = await supabase.from("matches").insert(newMatches as any[]);
+      if (insertError) throw insertError;
+
+      await fetchMatches();
+      await fetchTransactions({ reset: true });
+
+      toast({
+        title: "Auto Match complete",
+        description: `Matched ${newMatches.length} receipt${newMatches.length === 1 ? "" : "s"}.`,
+      });
+    } catch (e: any) {
+      toast({
+        title: "Auto Match failed",
+        description: e?.message || "Unknown error",
+        variant: "destructive",
+      });
+    }
   };
 
   if (orgLoading) {
